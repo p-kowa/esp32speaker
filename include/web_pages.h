@@ -161,7 +161,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       select.innerHTML = '';
       fetch('/api/stations')
         .then(res => res.json())
-        .then(presets => {
+        .then(data => {
+          const presets = data.stations || [];
           if (!presets.length) {
             const option = document.createElement('option');
             option.innerText = 'Keine Sender gespeichert';

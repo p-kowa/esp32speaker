@@ -247,7 +247,7 @@ void handleStatus() {
 }
 
 void handleStations() {
-    server.send(200, "application/json", stationMgr.json());
+    server.send(200, "application/json", "{\"stations\":" + stationMgr.json() + "}");
 }
 
 void handleStationDelete() {
