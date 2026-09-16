@@ -21,22 +21,30 @@ private:
     unsigned long nextAttempt = 0;
     bool discoverySent = false;
 
+    String getMacId() const {
+        char buf[9];
+        snprintf(buf, sizeof(buf), "%08X", (uint32_t)ESP.getEfuseMac());
+        return String(buf);
+    }
+
     String topic(const char *suffix) const { return base + "/" + suffix; }
 
     void publishDiscovery() {
-        String device = "{\"identifiers\":[\"esp32_radio\"],\"name\":\"ESP32 Radio\",\"manufacturer\":\"DIY\",\"model\":\"ESP32-S3 MAX98357A\"}";
+        String macId = getMacId();
+        String prefix = base + "_" + macId;
+        String device = "{\"identifiers\":[\"" + prefix + "\"],\"name\":\"ESP32 Radio (" + base + ")\",\"manufacturer\":\"DIY\",\"model\":\"ESP32-S3 MAX98357A\"}";
         bool availabilityOk = client.publish((base + "/availability").c_str(), "online", true);
         String shared = "\"availability_topic\":\"" + topic("availability") + "\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":" + device;
-        String switchPayload = String("{\"name\":\"Radio Power\",\"unique_id\":\"esp32_radio_power\",\"command_topic\":\"") + topic("set/power") +
+        String switchPayload = String("{\"name\":\"Radio Power\",\"unique_id\":\"") + prefix + "_power\",\"command_topic\":\"" + topic("set/power") +
             "\",\"state_topic\":\"" + topic("state/power") + "\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"state_on\":\"ON\",\"state_off\":\"OFF\"," + shared + "}";
-        String volumePayload = String("{\"name\":\"Radio Lautstärke\",\"unique_id\":\"esp32_radio_volume\",\"command_topic\":\"") + topic("set/volume") +
+        String volumePayload = String("{\"name\":\"Radio Lautstärke\",\"unique_id\":\"") + prefix + "_volume\",\"command_topic\":\"" + topic("set/volume") +
             "\",\"state_topic\":\"" + topic("state/volume") + "\",\"min\":0,\"max\":21,\"step\":1," + shared + "}";
-        String stationPayload = String("{\"name\":\"Radio Sender\",\"unique_id\":\"esp32_radio_station\",\"state_topic\":\"") + topic("state/station") + "," + shared + "}";
-        String titlePayload = String("{\"name\":\"Radio Titel\",\"unique_id\":\"esp32_radio_title\",\"state_topic\":\"") + topic("state/title") + "," + shared + "}";
-        bool discoveryOk = client.publish("homeassistant/switch/esp32_radio_power/config", switchPayload.c_str(), true);
-        discoveryOk = client.publish("homeassistant/number/esp32_radio_volume/config", volumePayload.c_str(), true) && discoveryOk;
-        discoveryOk = client.publish("homeassistant/sensor/esp32_radio_station/config", stationPayload.c_str(), true) && discoveryOk;
-        discoveryOk = client.publish("homeassistant/sensor/esp32_radio_title/config", titlePayload.c_str(), true) && discoveryOk;
+        String stationPayload = String("{\"name\":\"Radio Sender\",\"unique_id\":\"") + prefix + "_station\",\"state_topic\":\"" + topic("state/station") + "\"," + shared + "}";
+        String titlePayload = String("{\"name\":\"Radio Titel\",\"unique_id\":\"") + prefix + "_title\",\"state_topic\":\"" + topic("state/title") + "\"," + shared + "}";
+        bool discoveryOk = client.publish(("homeassistant/switch/" + prefix + "_power/config").c_str(), switchPayload.c_str(), true);
+        discoveryOk = client.publish(("homeassistant/number/" + prefix + "_volume/config").c_str(), volumePayload.c_str(), true) && discoveryOk;
+        discoveryOk = client.publish(("homeassistant/sensor/" + prefix + "_station/config").c_str(), stationPayload.c_str(), true) && discoveryOk;
+        discoveryOk = client.publish(("homeassistant/sensor/" + prefix + "_title/config").c_str(), titlePayload.c_str(), true) && discoveryOk;
         Serial.printf("[MQTT] Discovery availability=%s config=%s (%u Bytes)\n",
                       availabilityOk ? "OK" : "FEHLER", discoveryOk ? "OK" : "FEHLER", switchPayload.length());
         discoverySent = true;
@@ -97,7 +105,7 @@ public:
         if (!client.connected()) {
             if (millis() < nextAttempt) return;
             nextAttempt = millis() + 5000;
-            String clientId = "esp32radio-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+            String clientId = base + "-" + getMacId();
             bool ok = user.isEmpty() ? client.connect(clientId.c_str(), topic("availability").c_str(), 0, true, "offline") :
                 client.connect(clientId.c_str(), user.c_str(), password.c_str(), topic("availability").c_str(), 0, true, "offline");
             if (!ok) {
