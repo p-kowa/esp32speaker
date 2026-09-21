@@ -39,6 +39,34 @@ void handleStop();
 void triggerAlarmPlayback();
 void clearSdPlayAll();
 
+String buildStationOptionsJson() {
+    String json = "[";
+    StoredStation station;
+    for (size_t i = 0; i < stationMgr.size(); ++i) {
+        if (!stationMgr.get(i, station)) continue;
+        String escaped = station.name;
+        escaped.replace("\\", "\\\\");
+        escaped.replace("\"", "\\\"");
+        if (json.length() > 1) json += ',';
+        json += "\"" + escaped + "\"";
+    }
+    json += ']';
+    return json;
+}
+
+String buildSdOptionsJson() {
+    String json = "[";
+    for (const String &path : sdMgr.paths()) {
+        String escaped = path;
+        escaped.replace("\\", "\\\\");
+        escaped.replace("\"", "\\\"");
+        if (json.length() > 1) json += ',';
+        json += "\"" + escaped + "\"";
+    }
+    json += ']';
+    return json;
+}
+
 bool startSdPath(const String &path) {
     if (!sdMgr.isMounted() || !sdMgr.exists(path)) return false;
     audio.stopSong();
@@ -102,8 +130,18 @@ void handleMqttCommand(const String &topic, const String &payload) {
         else startStream("Custom Stream", payload);
     } else if (topic.endsWith("/set/station_url")) {
         startStream("Custom Stream", payload);
+    } else if (topic.endsWith("/set/station_name")) {
+        StoredStation station;
+        for (size_t i = 0; i < stationMgr.size(); ++i) {
+            if (stationMgr.get(i, station) && station.name == payload) {
+                startStream(station.name, station.url);
+                stationMgr.setLastSelected(i);
+                break;
+            }
+        }
     } else if (topic.endsWith("/set/m3u")) {
         stationMgr.importM3u(payload);
+        mqttMgr.refreshDiscovery();
     } else if (topic.endsWith("/set/alarm")) {
         int first = payload.indexOf(':');
         int second = payload.indexOf(':', first + 1);
@@ -116,6 +154,19 @@ void handleMqttCommand(const String &topic, const String &payload) {
         }
     } else if (topic.endsWith("/set/alarm_test")) {
         triggerAlarmPlayback();
+    } else if (topic.endsWith("/set/alarm_enabled")) {
+        alarmMgr.setEnabled(payload == "ON");
+    } else if (topic.endsWith("/set/alarm_time")) {
+        int colon = payload.indexOf(':');
+        if (colon > 0) alarmMgr.setTime(payload.substring(0, colon).toInt(), payload.substring(colon + 1).toInt());
+    } else if (topic.endsWith("/set/alarm_volume")) {
+        alarmMgr.setVolume(payload.toInt());
+    } else if (topic.endsWith("/set/alarm_source")) {
+        alarmMgr.setSourceType(payload);
+    } else if (topic.endsWith("/set/sd_play")) {
+        startSdPath(payload);
+    } else if (topic.endsWith("/set/alarm_sd_path")) {
+        alarmMgr.saveSource("sd", payload);
     }
 }
 
@@ -252,6 +303,7 @@ void handleStations() {
 
 void handleStationDelete() {
     if (server.hasArg("id") && stationMgr.remove(server.arg("id").toInt())) {
+        mqttMgr.refreshDiscovery();
         server.send(200, "text/plain", "OK");
         return;
     }
@@ -326,6 +378,7 @@ void handleM3uImport() {
         return;
     }
     stationMgr.importM3u(body);
+    mqttMgr.refreshDiscovery();
     server.send(200, "application/json", stationMgr.json());
 }
 
@@ -337,6 +390,7 @@ void handleM3uUpload() {
         m3uUploadBuffer.concat((const char *)upload.buf, upload.currentSize);
     } else if (upload.status == UPLOAD_FILE_END) {
         stationMgr.importM3u(m3uUploadBuffer);
+        mqttMgr.refreshDiscovery();
         m3uUploadBuffer = "";
         m3uUploadReceived = true;
     }
@@ -477,8 +531,10 @@ void setup() {
     // WLAN Initialisierung (NVS -> STA -> AP Fallback)
     wifiMgr.initWifi();
     stationMgr.begin();
-    mqttMgr.begin(handleMqttCommand);
     sdMgr.begin();
+    mqttMgr.setStationListProvider(buildStationOptionsJson);
+    mqttMgr.setSdListProvider(buildSdOptionsJson);
+    mqttMgr.begin(handleMqttCommand);
 
     // Wecker Manager & NTP Zeit-Sync starten
     alarmMgr.begin();
@@ -539,6 +595,8 @@ void loop() {
     if (millis() - lastMqttState > 5000) {
         lastMqttState = millis();
         mqttMgr.publishState(audio.isRunning(), currentStation, currentTitle, currentVolume);
+        mqttMgr.publishAlarmState(alarmMgr.isEnabled(), alarmMgr.getHour(), alarmMgr.getMinute(), alarmMgr.getVolume(), alarmMgr.getSource(), alarmMgr.getSdPath());
+        mqttMgr.publish("state/sd_current", currentStation.startsWith("SD: ") ? currentStreamUrl : "");
     }
 
     if (alarmMgr.checkAlarmTrigger()) {

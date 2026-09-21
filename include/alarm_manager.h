@@ -74,6 +74,37 @@ public:
         prefs.end();
     }
 
+    // Einzel-Setter für granulare MQTT-Entities (ändern jeweils nur ein Feld, Rest bleibt erhalten)
+    void setEnabled(bool enabled) {
+        _enabled = enabled;
+        prefs.begin("alarm_config", false);
+        prefs.putBool("enabled", _enabled);
+        prefs.end();
+    }
+
+    void setTime(int hour, int minute) {
+        _hour = constrain(hour, 0, 23);
+        _minute = constrain(minute, 0, 59);
+        prefs.begin("alarm_config", false);
+        prefs.putInt("hour", _hour);
+        prefs.putInt("min", _minute);
+        prefs.end();
+    }
+
+    void setVolume(int volume) {
+        _volume = constrain(volume, 0, 21);
+        prefs.begin("alarm_config", false);
+        prefs.putInt("vol", _volume);
+        prefs.end();
+    }
+
+    void setSourceType(const String &source) {
+        _source = source == "sd" ? "sd" : "radio";
+        prefs.begin("alarm_config", false);
+        prefs.putString("source", _source);
+        prefs.end();
+    }
+
     void saveRadioSource(const String &name, const String &url) {
         _source = "radio";
         _sdPath = "";
