@@ -115,6 +115,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         </div>
         <input type="range" id="volSlider" min="0" max="21" value="12" oninput="setVolume(this.value)">
       </div>
+      <div class="volume-box">
+        <div class="volume-label">
+          <span>📢 Durchsage-Lautstärke (TTS)</span>
+          <span id="annVolVal">14 / 21</span>
+        </div>
+        <input type="range" id="annVolSlider" min="0" max="21" value="14" oninput="setAnnounceVolume(this.value)">
+      </div>
       <div class="btn-row">
         <button class="btn-danger" onclick="stopAudio()">⏹ Stop</button>
       </div>
@@ -268,6 +275,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       }, 100);
     }
 
+    let annVolTimeout;
+    function setAnnounceVolume(val) {
+      document.getElementById('annVolVal').innerText = val + " / 21";
+      clearTimeout(annVolTimeout);
+      annVolTimeout = setTimeout(() => {
+        fetch('/api/announce/volume?val=' + val);
+      }, 100);
+    }
+
     function updateStatus() {
       fetch('/api/status')
         .then(res => res.json())
@@ -278,7 +294,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           
           const badge = document.getElementById('statusBadge');
           const badgeText = document.getElementById('statusText');
-          if (data.playing) {
+          if (data.announcing) {
+            badge.className = 'status-badge live';
+            badgeText.innerText = '📢 Durchsage';
+          } else if (data.playing) {
             badge.className = 'status-badge live';
             badgeText.innerText = 'Wiedergabe';
           } else {
@@ -289,6 +308,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           if (document.activeElement !== document.getElementById('volSlider')) {
             document.getElementById('volSlider').value = data.volume;
             document.getElementById('volVal').innerText = data.volume + " / 21";
+          }
+
+          if (data.announce_volume !== undefined && document.activeElement !== document.getElementById('annVolSlider')) {
+            document.getElementById('annVolSlider').value = data.announce_volume;
+            document.getElementById('annVolVal').innerText = data.announce_volume + " / 21";
           }
 
           document.getElementById('sysHeap').innerText = 'Heap: ' + Math.round(data.free_heap / 1024) + ' KB';

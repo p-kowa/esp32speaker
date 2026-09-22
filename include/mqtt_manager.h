@@ -53,8 +53,14 @@ private:
             "\",\"state_topic\":\"" + topic("state/alarm_volume") + "\",\"min\":0,\"max\":21,\"step\":1," + shared + "}";
         String alarmSourcePayload = String("{\"name\":\"Wecker Quelle\",\"unique_id\":\"") + prefix + "_alarm_source\",\"command_topic\":\"" + topic("set/alarm_source") +
             "\",\"state_topic\":\"" + topic("state/alarm_source") + "\",\"options\":[\"radio\",\"sd\"]," + shared + "}";
+        String announceVolPayload = String("{\"name\":\"Durchsage Lautstärke\",\"unique_id\":\"") + prefix + "_announce_volume\",\"command_topic\":\"" + topic("set/announce_volume") +
+            "\",\"state_topic\":\"" + topic("state/announce_volume") + "\",\"min\":0,\"max\":21,\"step\":1," + shared + "}";
+        String announceStatusPayload = String("{\"name\":\"Durchsage Status\",\"unique_id\":\"") + prefix + "_announcing\",\"state_topic\":\"" + topic("state/announcing") +
+            "\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\"," + shared + "}";
         bool discoveryOk = client.publish(("homeassistant/switch/" + prefix + "_power/config").c_str(), switchPayload.c_str(), true);
         discoveryOk = client.publish(("homeassistant/number/" + prefix + "_volume/config").c_str(), volumePayload.c_str(), true) && discoveryOk;
+        discoveryOk = client.publish(("homeassistant/number/" + prefix + "_announce_volume/config").c_str(), announceVolPayload.c_str(), true) && discoveryOk;
+        discoveryOk = client.publish(("homeassistant/binary_sensor/" + prefix + "_announcing/config").c_str(), announceStatusPayload.c_str(), true) && discoveryOk;
         discoveryOk = client.publish(("homeassistant/sensor/" + prefix + "_station/config").c_str(), stationPayload.c_str(), true) && discoveryOk;
         discoveryOk = client.publish(("homeassistant/sensor/" + prefix + "_title/config").c_str(), titlePayload.c_str(), true) && discoveryOk;
         discoveryOk = client.publish(("homeassistant/switch/" + prefix + "_alarm_enabled/config").c_str(), alarmSwitchPayload.c_str(), true) && discoveryOk;
@@ -160,13 +166,17 @@ public:
         client.loop();
     }
 
-    void publishState(bool playing, const String &station, const String &title, int volume) {
+    void publishState(bool playing, const String &station, const String &title, int volume, int announceVolume = -1, bool announcing = false) {
         if (!client.connected()) return;
         client.publish(topic("state").c_str(), playing ? "playing" : "idle", true);
         client.publish(topic("state/power").c_str(), playing ? "ON" : "OFF", true);
         client.publish(topic("state/station").c_str(), station.c_str(), true);
         client.publish(topic("state/title").c_str(), title.c_str(), true);
         client.publish(topic("state/volume").c_str(), String(volume).c_str(), true);
+        if (announceVolume >= 0) {
+            client.publish(topic("state/announce_volume").c_str(), String(announceVolume).c_str(), true);
+        }
+        client.publish(topic("state/announcing").c_str(), announcing ? "ON" : "OFF", true);
     }
 
     void publishAlarmState(bool enabled, int hour, int minute, int volume, const String &source, const String &sdPath) {

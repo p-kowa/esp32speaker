@@ -27,6 +27,7 @@ String currentTitle = "Kein Titel";
 String currentBitrate = "--";
 String currentStreamUrl = "";
 int currentVolume = DEFAULT_VOLUME;
+int currentAnnounceVolume = DEFAULT_ANNOUNCE_VOLUME;
 bool isPlaying = false;
 bool shouldReboot = false;
 unsigned long rebootTimer = 0;
@@ -35,9 +36,30 @@ std::vector<String> sdPlayAllPaths;
 size_t sdPlayAllIndex = 0;
 bool sdPlayAllActive = false;
 
+// Snapshot & Durchsage (Announcement / TTS) Status
+struct PlaybackSnapshot {
+    bool wasPlaying = false;
+    String station = "";
+    String url = "";
+    String title = "";
+    int volume = DEFAULT_VOLUME;
+    bool isSd = false;
+    String sdPath = "";
+    bool sdPlayAll = false;
+    size_t sdPlayAllIdx = 0;
+    std::vector<String> sdPlayAllList;
+};
+
+PlaybackSnapshot previousState;
+bool isAnnouncing = false;
+unsigned long announceStartMs = 0;
+const unsigned long ANNOUNCE_TIMEOUT_MS = 30000; // max. 30s Timeout für Durchsagen
+
 void handleStop();
 void triggerAlarmPlayback();
 void clearSdPlayAll();
+void playAnnouncement(const String &url, int volume = -1);
+void resumeAfterAnnouncement();
 
 String buildStationOptionsJson() {
     String json = "[";
@@ -100,6 +122,7 @@ void startStream(const String &name, const String &url) {
 void loadPersistedVolume() {
     audioPrefs.begin("audio_config", true);
     currentVolume = constrain(audioPrefs.getInt("volume", DEFAULT_VOLUME), 0, 21);
+    currentAnnounceVolume = constrain(audioPrefs.getInt("ann_vol", DEFAULT_ANNOUNCE_VOLUME), 0, 21);
     audioPrefs.end();
 }
 
@@ -109,10 +132,93 @@ void savePersistedVolume() {
     audioPrefs.end();
 }
 
+void savePersistedAnnounceVolume() {
+    audioPrefs.begin("audio_config", false);
+    audioPrefs.putInt("ann_vol", currentAnnounceVolume);
+    audioPrefs.end();
+}
+
 void setRadioVolume(int value, bool persist = true) {
     currentVolume = constrain(value, 0, 21);
     audio.setVolume(currentVolume);
     if (persist) savePersistedVolume();
+}
+
+void setAnnounceVolume(int value) {
+    currentAnnounceVolume = constrain(value, 0, 21);
+    savePersistedAnnounceVolume();
+    mqttMgr.publishState(audio.isRunning(), currentStation, currentTitle, currentVolume, currentAnnounceVolume, isAnnouncing);
+}
+
+void playAnnouncement(const String &url, int volume) {
+    if (url.isEmpty()) return;
+
+    // Falls gerade schon eine Durchsage läuft, nicht neu snapshotten
+    if (!isAnnouncing) {
+        previousState.wasPlaying = audio.isRunning() || isPlaying;
+        previousState.station = currentStation;
+        previousState.title = currentTitle;
+        previousState.url = currentStreamUrl;
+        previousState.volume = currentVolume;
+        previousState.isSd = currentStation.startsWith("SD: ");
+        previousState.sdPath = previousState.isSd ? currentStreamUrl : "";
+        previousState.sdPlayAll = sdPlayAllActive;
+        previousState.sdPlayAllIdx = sdPlayAllIndex;
+        previousState.sdPlayAllList = sdPlayAllPaths;
+    }
+
+    isAnnouncing = true;
+    announceStartMs = millis();
+
+    int targetVol = (volume >= 0) ? constrain(volume, 0, 21) : currentAnnounceVolume;
+    audio.stopSong();
+    clearSdPlayAll();
+
+    audio.setVolume(targetVol);
+    currentStation = "📢 DURCHSAGE";
+    currentTitle = "Sprachausgabe...";
+    currentBitrate = "--";
+    currentStreamUrl = url;
+    isPlaying = true;
+
+    Serial.printf("[ANNOUNCE] Starte Durchsage (%s) mit Lautstaerke %d (Vorher: wasPlaying=%d, vol=%d)\n",
+                  url.c_str(), targetVol, previousState.wasPlaying, previousState.volume);
+    
+    mqttMgr.publishState(true, currentStation, currentTitle, targetVol, currentAnnounceVolume, true);
+    audio.connecttohost(url.c_str());
+}
+
+void resumeAfterAnnouncement() {
+    if (!isAnnouncing) return;
+    isAnnouncing = false;
+
+    Serial.printf("[ANNOUNCE] Beende Durchsage. Wiederherstellung: wasPlaying=%d, isSd=%d, vol=%d\n",
+                  previousState.wasPlaying, previousState.isSd, previousState.volume);
+
+    audio.stopSong();
+    audio.setVolume(previousState.volume);
+    currentVolume = previousState.volume;
+
+    if (previousState.wasPlaying) {
+        if (previousState.isSd) {
+            if (previousState.sdPlayAll && !previousState.sdPlayAllList.empty()) {
+                sdPlayAllPaths = previousState.sdPlayAllList;
+                sdPlayAllIndex = previousState.sdPlayAllIdx;
+                sdPlayAllActive = true;
+                if (sdPlayAllIndex < sdPlayAllPaths.size()) {
+                    startSdPath(sdPlayAllPaths[sdPlayAllIndex]);
+                }
+            } else if (!previousState.sdPath.isEmpty()) {
+                startSdPath(previousState.sdPath);
+            }
+        } else if (!previousState.url.isEmpty()) {
+            startStream(previousState.station.isEmpty() ? "Radio" : previousState.station, previousState.url);
+        }
+    } else {
+        handleStop();
+    }
+
+    mqttMgr.publishState(audio.isRunning(), currentStation, currentTitle, currentVolume, currentAnnounceVolume, false);
 }
 
 void handleMqttCommand(const String &topic, const String &payload) {
@@ -167,6 +273,30 @@ void handleMqttCommand(const String &topic, const String &payload) {
         startSdPath(payload);
     } else if (topic.endsWith("/set/alarm_sd_path")) {
         alarmMgr.saveSource("sd", payload);
+    } else if (topic.endsWith("/set/announce_volume")) {
+        setAnnounceVolume(payload.toInt());
+    } else if (topic.endsWith("/set/announce")) {
+        String url = payload;
+        int vol = -1;
+        // Optional JSON-Unterstützung: {"url":"http://...","volume":15}
+        if (payload.startsWith("{") && payload.endsWith("}")) {
+            int urlKey = payload.indexOf("\"url\"");
+            if (urlKey >= 0) {
+                int startQuote = payload.indexOf('"', urlKey + 5);
+                int endQuote = payload.indexOf('"', startQuote + 1);
+                if (startQuote >= 0 && endQuote > startQuote) {
+                    url = payload.substring(startQuote + 1, endQuote);
+                }
+            }
+            int volKey = payload.indexOf("\"volume\"");
+            if (volKey >= 0) {
+                int colon = payload.indexOf(':', volKey);
+                if (colon >= 0) {
+                    vol = payload.substring(colon + 1).toInt();
+                }
+            }
+        }
+        playAnnouncement(url, vol);
     }
 }
 
@@ -289,6 +419,8 @@ void handleStatus() {
     json += "\"title\":\"" + currentTitle + "\",";
     json += "\"bitrate_raw\":\"" + currentBitrate + "\",";
     json += "\"volume\":" + String(currentVolume) + ",";
+    json += "\"announce_volume\":" + String(currentAnnounceVolume) + ",";
+    json += "\"announcing\":" + String(isAnnouncing ? "true" : "false") + ",";
     json += "\"free_heap\":" + String(ESP.getFreeHeap()) + ",";
     json += "\"free_psram\":" + String(ESP.getFreePsram()) + ",";
     json += "\"ap_mode\":" + String(wifiMgr.isApMode() ? "true" : "false") + ",";
@@ -428,6 +560,27 @@ void handlePlay() {
     server.send(400, "text/plain", "Keine URL angegeben");
 }
 
+// Webserver Route: Durchsage / TTS mit automatischem Resume
+void handleAnnounce() {
+    if (server.hasArg("url")) {
+        int vol = server.hasArg("volume") ? server.arg("volume").toInt() : (server.hasArg("vol") ? server.arg("vol").toInt() : -1);
+        playAnnouncement(server.arg("url"), vol);
+        server.send(200, "text/plain", "OK");
+        return;
+    }
+    server.send(400, "text/plain", "Keine Durchsage-URL angegeben");
+}
+
+// Webserver Route: Durchsage-Lautstärke einstellen
+void handleAnnounceVolume() {
+    if (server.hasArg("val")) {
+        setAnnounceVolume(server.arg("val").toInt());
+        server.send(200, "text/plain", "OK");
+        return;
+    }
+    server.send(400, "text/plain", "Ungueltiger Wert");
+}
+
 // Webserver Route: Stop
 void handleStop() {
     Serial.println("[RADIO] Stop");
@@ -547,6 +700,10 @@ void setup() {
     server.on("/api/status", HTTP_GET, handleStatus);
     server.on("/api/station", HTTP_GET, handleStation);
     server.on("/api/play", HTTP_GET, handlePlay);
+    server.on("/api/announce", HTTP_GET, handleAnnounce);
+    server.on("/api/announce", HTTP_POST, handleAnnounce);
+    server.on("/api/announce/volume", HTTP_GET, handleAnnounceVolume);
+    server.on("/api/announce/volume", HTTP_POST, handleAnnounceVolume);
     server.on("/api/stop", HTTP_GET, handleStop);
     server.on("/api/volume", HTTP_GET, handleVolume);
     server.on("/api/wifi/scan", HTTP_GET, handleWifiScan);
@@ -591,10 +748,16 @@ void loop() {
     server.handleClient();
     mqttMgr.loop();
 
+    // Timeout-Schutz für Durchsagen, falls der TTS-Stream abreißt
+    if (isAnnouncing && (millis() - announceStartMs > ANNOUNCE_TIMEOUT_MS)) {
+        Serial.println("[ANNOUNCE] Timeout erreicht, kehre zum vorherigen Zustand zurück.");
+        resumeAfterAnnouncement();
+    }
+
     static unsigned long lastMqttState = 0;
     if (millis() - lastMqttState > 5000) {
         lastMqttState = millis();
-        mqttMgr.publishState(audio.isRunning(), currentStation, currentTitle, currentVolume);
+        mqttMgr.publishState(audio.isRunning(), currentStation, currentTitle, currentVolume, currentAnnounceVolume, isAnnouncing);
         mqttMgr.publishAlarmState(alarmMgr.isEnabled(), alarmMgr.getHour(), alarmMgr.getMinute(), alarmMgr.getVolume(), alarmMgr.getSource(), alarmMgr.getSdPath());
         mqttMgr.publish("state/sd_current", currentStation.startsWith("SD: ") ? currentStreamUrl : "");
     }
@@ -644,6 +807,10 @@ void audio_bitrate(const char *info) {
 void audio_eof_mp3(const char *info) {
     Serial.print("[EOF MP3] ");
     Serial.println(info);
+    if (isAnnouncing) {
+        resumeAfterAnnouncement();
+        return;
+    }
     if (sdPlayAllActive) {
         ++sdPlayAllIndex;
         if (sdPlayAllIndex < sdPlayAllPaths.size()) {
@@ -652,5 +819,13 @@ void audio_eof_mp3(const char *info) {
             clearSdPlayAll();
             isPlaying = false;
         }
+    }
+}
+
+void audio_eof_speech(const char *info) {
+    Serial.print("[EOF SPEECH] ");
+    Serial.println(info);
+    if (isAnnouncing) {
+        resumeAfterAnnouncement();
     }
 }

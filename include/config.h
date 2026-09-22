@@ -17,6 +17,7 @@
 // ==========================================
 // 3. Audio-Einstellungen
 // ==========================================
-#define DEFAULT_VOLUME  12  // 0 bis 21 (Standardlautstärke beim Start)
+#define DEFAULT_VOLUME          12  // 0 bis 21 (Standardlautstärke beim Start)
+#define DEFAULT_ANNOUNCE_VOLUME 14  // 0 bis 21 (Standardlautstärke für Durchsagen / TTS)
 
 // Sender werden ausschließlich über M3U-Listen gespeichert.
