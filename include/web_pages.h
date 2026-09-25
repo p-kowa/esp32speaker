@@ -115,13 +115,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         </div>
         <input type="range" id="volSlider" min="0" max="21" value="12" oninput="setVolume(this.value)">
       </div>
-      <div class="volume-box">
-        <div class="volume-label">
-          <span>📢 Durchsage-Lautstärke (TTS)</span>
-          <span id="annVolVal">14 / 21</span>
-        </div>
-        <input type="range" id="annVolSlider" min="0" max="21" value="14" oninput="setAnnounceVolume(this.value)">
-      </div>
       <div class="btn-row">
         <button class="btn-danger" onclick="stopAudio()">⏹ Stop</button>
       </div>
@@ -140,6 +133,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="card advanced-card" id="advancedCard">
+      <div class="volume-box">
+        <div class="volume-label">
+          <span>📢 Durchsage-Lautstärke (TTS)</span>
+          <span id="annVolVal">14 / 21</span>
+        </div>
+        <input type="range" id="annVolSlider" min="0" max="21" value="14" oninput="setAnnounceVolume(this.value)">
+      </div>
       <h3 style="font-size: 0.9rem; margin-top: 1rem; margin-bottom: 0.4rem; color: var(--text-muted);">M3U-Senderliste</h3>
       <form id="m3uForm" enctype="multipart/form-data">
         <input type="file" id="m3uFile" name="file" accept=".m3u,.m3u8,.txt" style="width: 100%; color: var(--text-muted); margin-bottom: 0.5rem;">
