@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Preferences.h>
+#include <driver/i2s.h>
 #include "Audio.h"
 #include "config.h"
 #include "web_pages.h"
@@ -35,6 +36,49 @@ Preferences audioPrefs;
 std::vector<String> sdPlayAllPaths;
 size_t sdPlayAllIndex = 0;
 bool sdPlayAllActive = false;
+
+static TaskHandle_t micTaskHandle = nullptr;
+static portMUX_TYPE micMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool micStopRequested = false;
+static bool micActive = false;
+static float micDbfs = -60.0f;
+static int micError = 0;
+
+void microphoneTask(void *parameter) {
+    int32_t samples[256];
+    float smoothedDbfs = -60.0f;
+
+    while (!micStopRequested) {
+        size_t bytesRead = 0;
+        esp_err_t result = i2s_read(I2S_NUM_1, samples, sizeof(samples), &bytesRead, pdMS_TO_TICKS(200));
+        if (result != ESP_OK || bytesRead < sizeof(int32_t)) continue;
+
+        const size_t sampleCount = bytesRead / sizeof(int32_t);
+        double sumSquares = 0.0;
+        for (size_t index = 0; index < sampleCount; ++index) {
+            const double normalized = static_cast<double>(samples[index]) / 2147483648.0;
+            sumSquares += normalized * normalized;
+        }
+
+        const double rms = sqrt(sumSquares / sampleCount);
+        float currentDbfs = rms > 0.0 ? static_cast<float>(20.0 * log10(rms)) : -60.0f;
+        currentDbfs = constrain(currentDbfs, -60.0f, 0.0f);
+        smoothedDbfs = smoothedDbfs * 0.7f + currentDbfs * 0.3f;
+
+        portENTER_CRITICAL(&micMux);
+        micDbfs = smoothedDbfs;
+        portEXIT_CRITICAL(&micMux);
+    }
+
+    i2s_stop(I2S_NUM_1);
+    i2s_driver_uninstall(I2S_NUM_1);
+    portENTER_CRITICAL(&micMux);
+    micActive = false;
+    micDbfs = -60.0f;
+    micTaskHandle = nullptr;
+    portEXIT_CRITICAL(&micMux);
+    vTaskDelete(nullptr);
+}
 
 // Snapshot & Durchsage (Announcement / TTS) Status
 struct PlaybackSnapshot {
@@ -429,6 +473,94 @@ void handleStatus() {
     server.send(200, "application/json", json);
 }
 
+void handleMicStart() {
+    portENTER_CRITICAL(&micMux);
+    const bool taskExists = micTaskHandle != nullptr;
+    portEXIT_CRITICAL(&micMux);
+    if (taskExists) {
+        server.send(409, "text/plain", "Mikrofontest ist bereits aktiv oder wird beendet");
+        return;
+    }
+
+    i2s_config_t micConfig = {};
+    micConfig.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX);
+    micConfig.sample_rate = 16000;
+    micConfig.bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT;
+    micConfig.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
+    micConfig.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+    micConfig.intr_alloc_flags = 0;
+    micConfig.dma_buf_count = 4;
+    micConfig.dma_buf_len = 128;
+    micConfig.use_apll = false;
+    micConfig.tx_desc_auto_clear = false;
+    micConfig.fixed_mclk = 0;
+
+    esp_err_t result = i2s_driver_install(I2S_NUM_1, &micConfig, 0, nullptr);
+    if (result == ESP_OK) {
+        i2s_pin_config_t micPins = {};
+        micPins.mck_io_num = I2S_PIN_NO_CHANGE;
+        micPins.bck_io_num = I2S_MIC_BCLK;
+        micPins.ws_io_num = I2S_MIC_LRC;
+        micPins.data_out_num = I2S_PIN_NO_CHANGE;
+        micPins.data_in_num = I2S_MIC_DOUT;
+        result = i2s_set_pin(I2S_NUM_1, &micPins);
+    }
+    if (result != ESP_OK) {
+        i2s_driver_uninstall(I2S_NUM_1);
+        portENTER_CRITICAL(&micMux);
+        micError = result;
+        portEXIT_CRITICAL(&micMux);
+        server.send(500, "text/plain", "I2S-Mikrofon konnte nicht gestartet werden: " + String(static_cast<int>(result)));
+        return;
+    }
+
+    portENTER_CRITICAL(&micMux);
+    micStopRequested = false;
+    micError = 0;
+    micActive = true;
+    micDbfs = -60.0f;
+    portEXIT_CRITICAL(&micMux);
+
+    TaskHandle_t taskHandle = nullptr;
+    if (xTaskCreate(microphoneTask, "mic_rx", 4096, nullptr, 1, &taskHandle) != pdPASS) {
+        i2s_driver_uninstall(I2S_NUM_1);
+        portENTER_CRITICAL(&micMux);
+        micActive = false;
+        micError = ESP_ERR_NO_MEM;
+        portEXIT_CRITICAL(&micMux);
+        server.send(500, "text/plain", "Kein Speicher fuer den Mikrofontest");
+        return;
+    }
+    portENTER_CRITICAL(&micMux);
+    micTaskHandle = taskHandle;
+    portEXIT_CRITICAL(&micMux);
+    server.send(200, "text/plain", "OK");
+}
+
+void handleMicStop() {
+    portENTER_CRITICAL(&micMux);
+    const bool wasActive = micTaskHandle != nullptr;
+    micStopRequested = true;
+    portEXIT_CRITICAL(&micMux);
+    server.send(200, "text/plain", wasActive ? "Stopping" : "OK");
+}
+
+void handleMicStatus() {
+    bool active;
+    float level;
+    int error;
+    portENTER_CRITICAL(&micMux);
+    active = micActive;
+    level = micDbfs;
+    error = micError;
+    portEXIT_CRITICAL(&micMux);
+
+    String json = "{\"active\":" + String(active ? "true" : "false") +
+                  ",\"dbfs\":" + String(level, 1) +
+                  ",\"error\":" + String(error) + "}";
+    server.send(200, "application/json", json);
+}
+
 void handleStations() {
     server.send(200, "application/json", "{\"stations\":" + stationMgr.json() + "}");
 }
@@ -698,6 +830,9 @@ void setup() {
     server.on("/alarm", HTTP_GET, handleAlarmPage);
     server.on("/sdcard", HTTP_GET, handleSdCard);   
     server.on("/api/status", HTTP_GET, handleStatus);
+    server.on("/api/mic/start", HTTP_POST, handleMicStart);
+    server.on("/api/mic/stop", HTTP_POST, handleMicStop);
+    server.on("/api/mic/status", HTTP_GET, handleMicStatus);
     server.on("/api/station", HTTP_GET, handleStation);
     server.on("/api/play", HTTP_GET, handlePlay);
     server.on("/api/announce", HTTP_GET, handleAnnounce);

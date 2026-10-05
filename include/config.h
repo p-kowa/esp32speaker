@@ -21,3 +21,10 @@
 #define DEFAULT_ANNOUNCE_VOLUME 14  // 0 bis 21 (Standardlautstärke für Durchsagen / TTS)
 
 // Sender werden ausschließlich über M3U-Listen gespeichert.
+
+// ==========================================
+// 4. I2S I²S ICS43434 Pin-Belegung für ESP32-S3 (Mikrofon)
+#define I2S_MIC_BCLK    14   // Bit Clock (BCLK)
+#define I2S_MIC_LRC     16   // Word Select / Left Right Clock (LRC / WS)
+#define I2S_MIC_DOUT    21   // Data Out vom ICS43434 (DOUT)
+// ==========================================

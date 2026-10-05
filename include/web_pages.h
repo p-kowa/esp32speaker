@@ -36,6 +36,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     .options-toggle { color: var(--text-muted); font-size: 0.8rem; display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap; }
     .advanced-card { display: none; }
     .advanced-card select { width: 100%; background: #0f172a; border: 1px solid var(--border); border-radius: 0.5rem; color: var(--text); padding: 0.6rem; font-size: 0.85rem; margin-bottom: 0.5rem; }
+    .mic-meter { height: 14px; overflow: hidden; border-radius: 7px; background: #0f172a; border: 1px solid var(--border); }
+    .mic-meter-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #10b981 0%, #facc15 70%, #ef4444 100%); transition: width 0.12s linear; }
+    .mic-status { display: flex; justify-content: space-between; gap: 0.75rem; margin: 0.5rem 0; color: var(--text-muted); font-size: 0.85rem; }
     .subtitle { text-align: center; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem; }
     .now-playing { display: flex; flex-direction: column; gap: 0.5rem; }
     .status-badge { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; padding: 0.2rem 0.6rem; border-radius: 9999px; width: fit-content; background: #334155; }
@@ -133,6 +136,16 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="card advanced-card" id="advancedCard">
+      <h3 style="font-size: 0.9rem; margin-bottom: 0.6rem; color: var(--text-muted);">Mikrofontest (ICS43434)</h3>
+      <button type="button" class="btn-primary" id="micToggle">Mikrofon-Test starten</button>
+      <div class="mic-status"><span id="micState">Inaktiv</span><strong id="micDbfs">-60.0 dBFS</strong></div>
+      <div class="mic-meter" role="meter" aria-label="Mikrofonpegel" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="mic-meter-fill" id="micMeterFill"></div></div>
+      <div class="volume-box" style="margin-top: 0.75rem;">
+        <div class="volume-label"><label for="micSensitivity">Anzeige-Empfindlichkeit</label><span id="micSensitivityValue">1.0×</span></div>
+        <input type="range" id="micSensitivity" min="1" max="8" step="0.5" value="1">
+      </div>
+      <div id="micError" style="font-size: 0.8rem; color: var(--danger); margin-top: 0.4rem;"></div>
+
       <div class="volume-box">
         <div class="volume-label">
           <span>📢 Durchsage-Lautstärke (TTS)</span>
@@ -201,6 +214,56 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       localStorage.setItem('radioOptions', optionsToggle.checked);
       advancedCard.style.display = optionsToggle.checked ? 'block' : 'none';
     });
+
+    const micToggle = document.getElementById('micToggle');
+    const micSensitivity = document.getElementById('micSensitivity');
+    let micPollTimer = null;
+    micSensitivity.value = localStorage.getItem('micSensitivity') || '1';
+    document.getElementById('micSensitivityValue').innerText = Number(micSensitivity.value).toFixed(1) + '×';
+    micSensitivity.addEventListener('input', () => {
+      localStorage.setItem('micSensitivity', micSensitivity.value);
+      document.getElementById('micSensitivityValue').innerText = Number(micSensitivity.value).toFixed(1) + '×';
+      pollMicStatus();
+    });
+
+    function pollMicStatus() {
+      fetch('/api/mic/status')
+        .then(res => res.json())
+        .then(data => {
+          const state = document.getElementById('micState');
+          const dbfs = document.getElementById('micDbfs');
+          const fill = document.getElementById('micMeterFill');
+          const meter = fill.parentElement;
+          const error = document.getElementById('micError');
+          micToggle.innerText = data.active ? 'Mikrofon-Test stoppen' : 'Mikrofon-Test starten';
+          state.innerText = data.active ? 'Empfange I2S-Audio' : 'Inaktiv';
+          dbfs.innerText = Number(data.dbfs).toFixed(1) + ' dBFS';
+          const baseLevel = Math.max(0, Math.min(100, (Number(data.dbfs) + 60) * (100 / 60)));
+          const displayLevel = Math.min(100, baseLevel * Number(micSensitivity.value));
+          fill.style.width = displayLevel + '%';
+          meter.setAttribute('aria-valuenow', String(Math.round(displayLevel)));
+          error.innerText = data.error ? 'I2S-Fehler: ' + data.error : '';
+          if (!data.active && micPollTimer) {
+            clearInterval(micPollTimer);
+            micPollTimer = null;
+          }
+        })
+        .catch(() => { document.getElementById('micState').innerText = 'Status nicht erreichbar'; });
+    }
+
+    micToggle.addEventListener('click', () => {
+      const stopping = micToggle.innerText.includes('stoppen');
+      micToggle.disabled = true;
+      fetch(stopping ? '/api/mic/stop' : '/api/mic/start', { method: 'POST' })
+        .then(res => res.ok ? res.text() : res.text().then(text => Promise.reject(text)))
+        .then(() => {
+          if (!stopping && !micPollTimer) micPollTimer = setInterval(pollMicStatus, 250);
+          pollMicStatus();
+        })
+        .catch(error => { document.getElementById('micError').innerText = error; })
+        .finally(() => { micToggle.disabled = false; });
+    });
+    pollMicStatus();
 
     document.getElementById('m3uForm').addEventListener('submit', event => {
       event.preventDefault();
