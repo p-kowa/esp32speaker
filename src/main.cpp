@@ -29,6 +29,7 @@ String currentStreamUrl = "";
 int currentVolume = DEFAULT_VOLUME;
 int currentAnnounceVolume = DEFAULT_ANNOUNCE_VOLUME;
 bool isPlaying = false;
+bool radioPowerOn = true;
 bool shouldReboot = false;
 unsigned long rebootTimer = 0;
 Preferences audioPrefs;
@@ -89,7 +90,14 @@ String buildSdOptionsJson() {
     return json;
 }
 
-bool startSdPath(const String &path) {
+void savePersistedRadioPower(bool powerOn) {
+    radioPowerOn = powerOn;
+    audioPrefs.begin("audio_config", false);
+    audioPrefs.putBool("radio_on", powerOn);
+    audioPrefs.end();
+}
+
+bool startSdPath(const String &path, bool persistPower = true) {
     if (!sdMgr.isMounted() || !sdMgr.exists(path)) return false;
     audio.stopSong();
     clearSdPlayAll();
@@ -99,6 +107,7 @@ bool startSdPath(const String &path) {
     currentStreamUrl = path;
     audio.setVolume(currentVolume);
     isPlaying = audio.connecttoFS(sdMgr.filesystem(), path.c_str());
+    if (persistPower) savePersistedRadioPower(true);
     return isPlaying;
 }
 
@@ -108,7 +117,7 @@ void clearSdPlayAll() {
     sdPlayAllActive = false;
 }
 
-void startStream(const String &name, const String &url) {
+void startStream(const String &name, const String &url, bool persistPower = true) {
     if (url.isEmpty()) return;
     clearSdPlayAll();
     currentStation = name;
@@ -117,12 +126,14 @@ void startStream(const String &name, const String &url) {
     currentStreamUrl = url;
     isPlaying = true;
     audio.connecttohost(currentStreamUrl.c_str());
+    if (persistPower) savePersistedRadioPower(true);
 }
 
 void loadPersistedVolume() {
     audioPrefs.begin("audio_config", true);
     currentVolume = constrain(audioPrefs.getInt("volume", DEFAULT_VOLUME), 0, 21);
     currentAnnounceVolume = constrain(audioPrefs.getInt("ann_vol", DEFAULT_ANNOUNCE_VOLUME), 0, 21);
+    radioPowerOn = audioPrefs.getBool("radio_on", true);
     audioPrefs.end();
 }
 
@@ -206,13 +217,13 @@ void resumeAfterAnnouncement() {
                 sdPlayAllIndex = previousState.sdPlayAllIdx;
                 sdPlayAllActive = true;
                 if (sdPlayAllIndex < sdPlayAllPaths.size()) {
-                    startSdPath(sdPlayAllPaths[sdPlayAllIndex]);
+                    startSdPath(sdPlayAllPaths[sdPlayAllIndex], false);
                 }
             } else if (!previousState.sdPath.isEmpty()) {
-                startSdPath(previousState.sdPath);
+                startSdPath(previousState.sdPath, false);
             }
         } else if (!previousState.url.isEmpty()) {
-            startStream(previousState.station.isEmpty() ? "Radio" : previousState.station, previousState.url);
+            startStream(previousState.station.isEmpty() ? "Radio" : previousState.station, previousState.url, false);
         }
     } else {
         handleStop();
@@ -351,7 +362,7 @@ void triggerAlarmPlayback() {
         clearSdPlayAll();
         setRadioVolume(alarmMgr.getVolume(), false);
         currentTitle = "⏰ WECKER AUSGELÖST";
-        isPlaying = startSdPath(alarmMgr.getSdPath());
+        isPlaying = startSdPath(alarmMgr.getSdPath(), false);
         return;
     }
     if (alarmMgr.getRadioUrl().isEmpty()) {
@@ -492,6 +503,7 @@ void handleSdStopAll() {
     clearSdPlayAll();
     audio.stopSong();
     isPlaying = false;
+    savePersistedRadioPower(false);
     server.send(200, "text/plain", "OK");
 }
 
@@ -552,6 +564,7 @@ void handlePlay() {
         currentTitle = "Verbinde...";
         currentBitrate = "--";
         isPlaying = true;
+        savePersistedRadioPower(true);
         Serial.printf("[RADIO] Starte Custom URL: %s\n", currentStreamUrl.c_str());
         audio.connecttohost(currentStreamUrl.c_str());
         server.send(200, "text/plain", "OK");
@@ -587,6 +600,7 @@ void handleStop() {
     clearSdPlayAll();
     audio.stopSong();
     isPlaying = false;
+    savePersistedRadioPower(false);
     currentStation = "Gestoppt";
     currentTitle = "--";
     currentBitrate = "--";
@@ -730,7 +744,7 @@ void setup() {
     Serial.println("[HTTP] Webserver gestartet auf Port 80.");
 
     // Autostart des Radiosenders nur im STA Modus
-    if (!wifiMgr.isApMode() && WiFi.status() == WL_CONNECTED && stationMgr.size() > 0) {
+    if (radioPowerOn && !wifiMgr.isApMode() && WiFi.status() == WL_CONNECTED && stationMgr.size() > 0) {
         delay(1000);
         StoredStation station;
         int lastStation = stationMgr.getLastSelected();
