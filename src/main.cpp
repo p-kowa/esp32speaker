@@ -12,6 +12,9 @@
 #include "sd_manager.h"
 #include <vector>
 
+// Reserve fuer Webserver-Upload (M3U-Import) und Senderdatei-Zugriffe im loopTask
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+
 // Instanzen
 Audio audio;
 WebServer server(80);
@@ -36,6 +39,9 @@ Preferences audioPrefs;
 std::vector<String> sdPlayAllPaths;
 size_t sdPlayAllIndex = 0;
 bool sdPlayAllActive = false;
+// Von Audio-Callbacks gesetzt, in loop() ausgefuehrt (kein Neustart innerhalb audio.loop())
+volatile bool pendingResume = false;
+volatile bool pendingSdNext = false;
 
 // Snapshot & Durchsage (Announcement / TTS) Status
 struct PlaybackSnapshot {
@@ -54,27 +60,18 @@ struct PlaybackSnapshot {
 PlaybackSnapshot previousState;
 bool isAnnouncing = false;
 unsigned long announceStartMs = 0;
-const unsigned long ANNOUNCE_TIMEOUT_MS = 30000; // max. 30s Timeout für Durchsagen
+unsigned long announceLastActiveMs = 0;
+const unsigned long ANNOUNCE_IDLE_TIMEOUT_MS = 10000;
+const unsigned long ANNOUNCE_MAX_MS = 300000;
 
-void handleStop();
+void stopPlayback();
 void triggerAlarmPlayback();
 void clearSdPlayAll();
 void playAnnouncement(const String &url, int volume = -1);
 void resumeAfterAnnouncement();
 
 String buildStationOptionsJson() {
-    String json = "[";
-    StoredStation station;
-    for (size_t i = 0; i < stationMgr.size(); ++i) {
-        if (!stationMgr.get(i, station)) continue;
-        String escaped = station.name;
-        escaped.replace("\\", "\\\\");
-        escaped.replace("\"", "\\\"");
-        if (json.length() > 1) json += ',';
-        json += "\"" + escaped + "\"";
-    }
-    json += ']';
-    return json;
+    return stationMgr.favNamesJson();
 }
 
 String buildSdOptionsJson() {
@@ -91,6 +88,7 @@ String buildSdOptionsJson() {
 }
 
 void savePersistedRadioPower(bool powerOn) {
+    if (radioPowerOn == powerOn) return;
     radioPowerOn = powerOn;
     audioPrefs.begin("audio_config", false);
     audioPrefs.putBool("radio_on", powerOn);
@@ -100,7 +98,6 @@ void savePersistedRadioPower(bool powerOn) {
 bool startSdPath(const String &path, bool persistPower = true) {
     if (!sdMgr.isMounted() || !sdMgr.exists(path)) return false;
     audio.stopSong();
-    clearSdPlayAll();
     currentStation = "SD: " + path;
     currentTitle = "Lokale Datei";
     currentBitrate = "--";
@@ -127,6 +124,31 @@ void startStream(const String &name, const String &url, bool persistPower = true
     isPlaying = true;
     audio.connecttohost(currentStreamUrl.c_str());
     if (persistPower) savePersistedRadioPower(true);
+}
+
+void playStoredStation(const StoredStation &station) {
+    stationMgr.setLastSelected(station);
+    startStream(station.name, station.url);
+}
+
+bool startLastOrFirst() {
+    StoredStation station;
+    if (!stationMgr.getLastSelected(station) && !stationMgr.favGet(0, station) && !stationMgr.get(0, station)) {
+        return false;
+    }
+    startStream(station.name, station.url);
+    return true;
+}
+
+void playNextSdFile() {
+    if (!sdPlayAllActive) return;
+    ++sdPlayAllIndex;
+    if (sdPlayAllIndex < sdPlayAllPaths.size()) {
+        isPlaying = startSdPath(sdPlayAllPaths[sdPlayAllIndex], false);
+    } else {
+        clearSdPlayAll();
+        isPlaying = false;
+    }
 }
 
 void loadPersistedVolume() {
@@ -180,6 +202,7 @@ void playAnnouncement(const String &url, int volume) {
 
     isAnnouncing = true;
     announceStartMs = millis();
+    announceLastActiveMs = announceStartMs;
 
     int targetVol = (volume >= 0) ? constrain(volume, 0, 21) : currentAnnounceVolume;
     audio.stopSong();
@@ -226,7 +249,7 @@ void resumeAfterAnnouncement() {
             startStream(previousState.station.isEmpty() ? "Radio" : previousState.station, previousState.url, false);
         }
     } else {
-        handleStop();
+        stopPlayback();
     }
 
     mqttMgr.publishState(audio.isRunning(), currentStation, currentTitle, currentVolume, currentAnnounceVolume, false);
@@ -234,31 +257,26 @@ void resumeAfterAnnouncement() {
 
 void handleMqttCommand(const String &topic, const String &payload) {
     if (topic.endsWith("/set/power")) {
-        if (payload == "OFF") handleStop();
-        else if (payload == "ON") {
-            StoredStation station;
-            if (stationMgr.get(0, station)) startStream(station.name, station.url);
-        }
+        if (payload == "OFF") stopPlayback();
+        else if (payload == "ON") startLastOrFirst();
     } else if (topic.endsWith("/set/volume")) {
         setRadioVolume(payload.toInt());
     } else if (topic.endsWith("/set/station")) {
         StoredStation station;
-        if (stationMgr.get(payload.toInt(), station)) startStream(station.name, station.url);
-        else startStream("Custom Stream", payload);
+        if (payload.indexOf("://") >= 0) startStream("Custom Stream", payload);
+        else if (stationMgr.get(payload.toInt(), station)) playStoredStation(station);
     } else if (topic.endsWith("/set/station_url")) {
         startStream("Custom Stream", payload);
     } else if (topic.endsWith("/set/station_name")) {
         StoredStation station;
-        for (size_t i = 0; i < stationMgr.size(); ++i) {
-            if (stationMgr.get(i, station) && station.name == payload) {
-                startStream(station.name, station.url);
-                stationMgr.setLastSelected(i);
+        for (size_t i = 0; stationMgr.favGet(i, station); ++i) {
+            if (station.name == payload) {
+                playStoredStation(station);
                 break;
             }
         }
     } else if (topic.endsWith("/set/m3u")) {
         stationMgr.importM3u(payload);
-        mqttMgr.refreshDiscovery();
     } else if (topic.endsWith("/set/alarm")) {
         int first = payload.indexOf(':');
         int second = payload.indexOf(':', first + 1);
@@ -281,6 +299,7 @@ void handleMqttCommand(const String &topic, const String &payload) {
     } else if (topic.endsWith("/set/alarm_source")) {
         alarmMgr.setSourceType(payload);
     } else if (topic.endsWith("/set/sd_play")) {
+        clearSdPlayAll();
         startSdPath(payload);
     } else if (topic.endsWith("/set/alarm_sd_path")) {
         alarmMgr.saveSource("sd", payload);
@@ -348,7 +367,7 @@ void handleAlarmStatus() {
         alarmLabel = alarmMgr.getRadioName().isEmpty() ? "Radio: nicht gesetzt" : "Radio: " + alarmMgr.getRadioName();
     }
     json.remove(json.length() - 1);
-    json += ",\"alarm_label\":\"" + alarmLabel + "\"}";
+    json += ",\"alarm_label\":\"" + StationManager::jsonEscape(alarmLabel) + "\"}";
     server.send(200, "application/json", json);
 }
 
@@ -399,8 +418,7 @@ void handleAlarmSave() {
 
 void handleRadioAlarmSave() {
     StoredStation station;
-    int selected = stationMgr.getLastSelected();
-    if (selected < 0 || !stationMgr.get(selected, station)) {
+    if (!stationMgr.getLastSelected(station)) {
         server.send(409, "text/plain", "Kein Sender ausgewaehlt");
         return;
     }
@@ -426,9 +444,9 @@ void handleAlarmTest() {
 void handleStatus() {
     String json = "{";
     json += "\"playing\":" + String(audio.isRunning() ? "true" : "false") + ",";
-    json += "\"station\":\"" + currentStation + "\",";
-    json += "\"title\":\"" + currentTitle + "\",";
-    json += "\"bitrate_raw\":\"" + currentBitrate + "\",";
+    json += "\"station\":\"" + StationManager::jsonEscape(currentStation) + "\",";
+    json += "\"title\":\"" + StationManager::jsonEscape(currentTitle) + "\",";
+    json += "\"bitrate_raw\":\"" + StationManager::jsonEscape(currentBitrate) + "\",";
     json += "\"volume\":" + String(currentVolume) + ",";
     json += "\"announce_volume\":" + String(currentAnnounceVolume) + ",";
     json += "\"announcing\":" + String(isAnnouncing ? "true" : "false") + ",";
@@ -441,16 +459,56 @@ void handleStatus() {
 }
 
 void handleStations() {
-    server.send(200, "application/json", "{\"stations\":" + stationMgr.json() + "}");
+    long offset = server.hasArg("offset") ? server.arg("offset").toInt() : 0;
+    long limit = server.hasArg("limit") ? server.arg("limit").toInt() : 20;
+    offset = max(0L, offset);
+    limit = constrain(limit, 1L, 100L);
+    server.send(200, "application/json", stationMgr.search(server.arg("q"), (size_t)offset, (size_t)limit));
 }
 
 void handleStationDelete() {
     if (server.hasArg("id") && stationMgr.remove(server.arg("id").toInt())) {
-        mqttMgr.refreshDiscovery();
         server.send(200, "text/plain", "OK");
         return;
     }
     server.send(400, "text/plain", "Ungueltige Sender-ID");
+}
+
+void handleFavorites() {
+    server.send(200, "application/json", stationMgr.favJson());
+}
+
+void handleFavoriteAdd() {
+    StoredStation station;
+    if (!server.hasArg("id") || !stationMgr.get(server.arg("id").toInt(), station)) {
+        server.send(400, "text/plain", "Ungueltige Sender-ID");
+        return;
+    }
+    if (!stationMgr.favAdd(station)) {
+        server.send(409, "text/plain", "Maximal " + String((unsigned)StationManager::MAX_FAVORITES) + " Favoriten");
+        return;
+    }
+    mqttMgr.refreshDiscovery();
+    server.send(200, "text/plain", "OK");
+}
+
+void handleFavoriteRemove() {
+    if (!server.hasArg("idx") || !stationMgr.favRemove(server.arg("idx").toInt())) {
+        server.send(400, "text/plain", "Ungueltiger Favorit");
+        return;
+    }
+    mqttMgr.refreshDiscovery();
+    server.send(200, "text/plain", "OK");
+}
+
+void handleFavoritePlay() {
+    StoredStation station;
+    if (!server.hasArg("idx") || !stationMgr.favGet(server.arg("idx").toInt(), station)) {
+        server.send(400, "text/plain", "Ungueltiger Favorit");
+        return;
+    }
+    playStoredStation(station);
+    server.send(200, "text/plain", "OK");
 }
 
 void handleSdFiles() {
@@ -507,47 +565,62 @@ void handleSdStopAll() {
     server.send(200, "text/plain", "OK");
 }
 
-String m3uUploadBuffer;
-bool m3uUploadReceived = false;
+bool m3uUploadDone = false;
+bool m3uUploadOk = false;
+size_t m3uImportedCount = 0;
 
+String m3uResultJson(size_t imported) {
+    return "{\"imported\":" + String((unsigned)imported) + ",\"total\":" + String((unsigned)stationMgr.size()) +
+           ",\"storage\":\"" + (stationMgr.usesSd() ? "sd" : "nvs") + "\"}";
+}
+
+// Modus per URL-Parameter (?mode=replace|append), da Formularfelder beim Upload-Start noch nicht geparst sind
 void handleM3uImport() {
-    String body = server.arg("plain");
-    if (body.isEmpty()) {
-        if (m3uUploadReceived) {
-            m3uUploadReceived = false;
-            server.send(200, "application/json", stationMgr.json());
+    if (m3uUploadDone) {
+        m3uUploadDone = false;
+        if (!m3uUploadOk) {
+            server.send(500, "text/plain", "Senderliste konnte nicht geschrieben werden");
             return;
         }
+        server.send(200, "application/json", m3uResultJson(m3uImportedCount));
+        return;
+    }
+    String body = server.arg("plain");
+    if (body.isEmpty()) {
         server.send(400, "text/plain", "M3U body missing");
         return;
     }
-    stationMgr.importM3u(body);
-    mqttMgr.refreshDiscovery();
-    server.send(200, "application/json", stationMgr.json());
+    if (!stationMgr.beginImport(server.arg("mode") == "replace")) {
+        server.send(500, "text/plain", "Senderliste konnte nicht geschrieben werden");
+        return;
+    }
+    stationMgr.feed((const uint8_t *)body.c_str(), body.length());
+    server.send(200, "application/json", m3uResultJson(stationMgr.endImport()));
 }
 
 void handleM3uUpload() {
     HTTPUpload &upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
-        m3uUploadBuffer = "";
+        m3uUploadDone = false;
+        m3uImportedCount = 0;
+        m3uUploadOk = stationMgr.beginImport(server.arg("mode") == "replace");
     } else if (upload.status == UPLOAD_FILE_WRITE) {
-        m3uUploadBuffer.concat((const char *)upload.buf, upload.currentSize);
+        stationMgr.feed(upload.buf, upload.currentSize);
     } else if (upload.status == UPLOAD_FILE_END) {
-        stationMgr.importM3u(m3uUploadBuffer);
-        mqttMgr.refreshDiscovery();
-        m3uUploadBuffer = "";
-        m3uUploadReceived = true;
+        m3uImportedCount = stationMgr.endImport();
+        m3uUploadDone = true;
+    } else if (upload.status == UPLOAD_FILE_ABORTED) {
+        stationMgr.abortImport();
+        m3uUploadOk = false;
     }
 }
 
-// Webserver Route: Sender Preset abspielen
+// Webserver Route: Sender aus der Liste abspielen
 void handleStation() {
     if (server.hasArg("id")) {
-        int id = server.arg("id").toInt();
         StoredStation station;
-        if (stationMgr.get(id, station)) {
-            stationMgr.setLastSelected(id);
-            startStream(station.name, station.url);
+        if (stationMgr.get(server.arg("id").toInt(), station)) {
+            playStoredStation(station);
             server.send(200, "text/plain", "OK");
             return;
         }
@@ -594,8 +667,7 @@ void handleAnnounceVolume() {
     server.send(400, "text/plain", "Ungueltiger Wert");
 }
 
-// Webserver Route: Stop
-void handleStop() {
+void stopPlayback() {
     Serial.println("[RADIO] Stop");
     clearSdPlayAll();
     audio.stopSong();
@@ -604,6 +676,11 @@ void handleStop() {
     currentStation = "Gestoppt";
     currentTitle = "--";
     currentBitrate = "--";
+}
+
+// Webserver Route: Stop
+void handleStop() {
+    stopPlayback();
     server.send(200, "text/plain", "OK");
 }
 
@@ -697,8 +774,10 @@ void setup() {
 
     // WLAN Initialisierung (NVS -> STA -> AP Fallback)
     wifiMgr.initWifi();
-    stationMgr.begin();
     sdMgr.begin();
+    stationMgr.begin(sdMgr.isMounted() ? &sdMgr.filesystem() : nullptr);
+    Serial.printf("[RADIO] %u Sender (%s), %u Favoriten\n", (unsigned)stationMgr.size(),
+                  stationMgr.usesSd() ? "SD" : "NVS", (unsigned)stationMgr.favSize());
     mqttMgr.setStationListProvider(buildStationOptionsJson);
     mqttMgr.setSdListProvider(buildSdOptionsJson);
     mqttMgr.begin(handleMqttCommand);
@@ -725,6 +804,10 @@ void setup() {
     server.on("/api/wifi/reset", HTTP_POST, handleWifiReset);
     server.on("/api/stations", HTTP_GET, handleStations);
     server.on("/api/stations/delete", HTTP_POST, handleStationDelete);
+    server.on("/api/favorites", HTTP_GET, handleFavorites);
+    server.on("/api/favorites/add", HTTP_POST, handleFavoriteAdd);
+    server.on("/api/favorites/remove", HTTP_POST, handleFavoriteRemove);
+    server.on("/api/favorite", HTTP_GET, handleFavoritePlay);
     server.on("/api/sd/files", HTTP_GET, handleSdFiles);
     server.on("/api/sd/play", HTTP_GET, handleSdPlay);
     server.on("/api/sd/play", HTTP_POST, handleSdPlay);
@@ -744,28 +827,35 @@ void setup() {
     Serial.println("[HTTP] Webserver gestartet auf Port 80.");
 
     // Autostart des Radiosenders nur im STA Modus
-    if (radioPowerOn && !wifiMgr.isApMode() && WiFi.status() == WL_CONNECTED && stationMgr.size() > 0) {
+    if (radioPowerOn && !wifiMgr.isApMode() && WiFi.status() == WL_CONNECTED) {
         delay(1000);
-        StoredStation station;
-        int lastStation = stationMgr.getLastSelected();
-        if (lastStation < 0 || !stationMgr.get(lastStation, station)) {
-            lastStation = 0;
-            stationMgr.get(lastStation, station);
+        if (startLastOrFirst()) {
+            Serial.printf("[RADIO] Autostart: %s\n", currentStation.c_str());
         }
-        Serial.printf("[RADIO] Starte zuletzt gewaehlten Sender %d: %s\n", lastStation, station.name.c_str());
-        startStream(station.name, station.url);
     }
 }
 
 void loop() {
     audio.loop();
+    if (pendingResume) {
+        pendingResume = false;
+        resumeAfterAnnouncement();
+    }
+    if (pendingSdNext) {
+        pendingSdNext = false;
+        playNextSdFile();
+    }
     server.handleClient();
     mqttMgr.loop();
 
     // Timeout-Schutz für Durchsagen, falls der TTS-Stream abreißt
-    if (isAnnouncing && (millis() - announceStartMs > ANNOUNCE_TIMEOUT_MS)) {
-        Serial.println("[ANNOUNCE] Timeout erreicht, kehre zum vorherigen Zustand zurück.");
-        resumeAfterAnnouncement();
+    if (isAnnouncing) {
+        unsigned long now = millis();
+        if (audio.isRunning()) announceLastActiveMs = now;
+        if (now - announceLastActiveMs > ANNOUNCE_IDLE_TIMEOUT_MS || now - announceStartMs > ANNOUNCE_MAX_MS) {
+            Serial.println("[ANNOUNCE] Timeout erreicht, kehre zum vorherigen Zustand zurück.");
+            resumeAfterAnnouncement();
+        }
     }
 
     static unsigned long lastMqttState = 0;
@@ -822,24 +912,14 @@ void audio_eof_mp3(const char *info) {
     Serial.print("[EOF MP3] ");
     Serial.println(info);
     if (isAnnouncing) {
-        resumeAfterAnnouncement();
+        pendingResume = true;
         return;
     }
-    if (sdPlayAllActive) {
-        ++sdPlayAllIndex;
-        if (sdPlayAllIndex < sdPlayAllPaths.size()) {
-            isPlaying = startSdPath(sdPlayAllPaths[sdPlayAllIndex]);
-        } else {
-            clearSdPlayAll();
-            isPlaying = false;
-        }
-    }
+    if (sdPlayAllActive) pendingSdNext = true;
 }
 
 void audio_eof_speech(const char *info) {
     Serial.print("[EOF SPEECH] ");
     Serial.println(info);
-    if (isAnnouncing) {
-        resumeAfterAnnouncement();
-    }
+    if (isAnnouncing) pendingResume = true;
 }
