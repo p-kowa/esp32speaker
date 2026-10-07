@@ -169,6 +169,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         <button type="submit" class="btn-primary">📂 M3U hochladen</button>
       </form>
       <div id="m3uMsg" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;"></div>
+      <button type="button" class="btn-danger" id="clearStations" style="width: 100%; margin-top: 0.75rem;">🗑️ Alle Sender löschen</button>
     </div>
 
     <div class="system-info">
@@ -288,6 +289,18 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         .then(() => { msg.innerText = 'Sender gelöscht.'; loadStations(); })
         .catch(error => { msg.innerText = 'Löschen fehlgeschlagen: ' + error; });
     }
+
+    document.getElementById('clearStations').addEventListener('click', () => {
+      if (!confirm('Wirklich ALLE Sender löschen? Favoriten bleiben erhalten.')) return;
+      const msg = document.getElementById('m3uMsg');
+      postForm('/api/stations/clear', {})
+        .then(() => {
+          msg.innerText = 'Alle Sender gelöscht.';
+          stationOffset = 0;
+          loadStations();
+        })
+        .catch(error => { msg.innerText = 'Löschen fehlgeschlagen: ' + error; });
+    });
 
     let searchTimeout;
     document.getElementById('stationSearch').addEventListener('input', event => {

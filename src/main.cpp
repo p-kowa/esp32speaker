@@ -474,6 +474,14 @@ void handleStationDelete() {
     server.send(400, "text/plain", "Ungueltige Sender-ID");
 }
 
+void handleStationsClear() {
+    if (!stationMgr.clear()) {
+        server.send(500, "text/plain", "Senderliste konnte nicht geloescht werden");
+        return;
+    }
+    server.send(200, "text/plain", "OK");
+}
+
 void handleFavorites() {
     server.send(200, "application/json", stationMgr.favJson());
 }
@@ -804,6 +812,7 @@ void setup() {
     server.on("/api/wifi/reset", HTTP_POST, handleWifiReset);
     server.on("/api/stations", HTTP_GET, handleStations);
     server.on("/api/stations/delete", HTTP_POST, handleStationDelete);
+    server.on("/api/stations/clear", HTTP_POST, handleStationsClear);
     server.on("/api/favorites", HTTP_GET, handleFavorites);
     server.on("/api/favorites/add", HTTP_POST, handleFavoriteAdd);
     server.on("/api/favorites/remove", HTTP_POST, handleFavoriteRemove);
