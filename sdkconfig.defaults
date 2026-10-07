@@ -1,6 +1,9 @@
 # FreeRTOS Tick Rate
 CONFIG_FREERTOS_HZ=1000
 
+# setup()/loop() laufen in app_main -> großer Stack nötig
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+
 # SPI Flash (16 MB & QIO Modus)
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"

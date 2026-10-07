@@ -22,7 +22,8 @@ private:
     String password;
     uint16_t port = 1883;
     String base = "esp32radio";
-    unsigned long nextAttempt = 0;
+    unsigned long lastAttempt = 0;
+    bool attempted = false;
     bool discoverySent = false;
 
     String getMacId() const {
@@ -115,7 +116,8 @@ public:
             for (unsigned int i = 0; i < length; ++i) body += (char)payload[i];
             if (handler) handler(String(topicName), body);
         });
-        client.setBufferSize(1024);
+        // Discovery-Payloads mit Favoriten-/SD-Listen sind deutlich groesser als 1 KB
+        client.setBufferSize(8192);
     }
 
     void saveConfig(const String &newHost, uint16_t newPort, const String &newUser, const String &newPassword, const String &newBase) {
@@ -149,8 +151,9 @@ public:
     void loop() {
         if (!configured() || WiFi.status() != WL_CONNECTED) return;
         if (!client.connected()) {
-            if (millis() < nextAttempt) return;
-            nextAttempt = millis() + 5000;
+            if (attempted && millis() - lastAttempt < 5000) return;
+            attempted = true;
+            lastAttempt = millis();
             String clientId = base + "-" + getMacId();
             bool ok = user.isEmpty() ? client.connect(clientId.c_str(), topic("availability").c_str(), 0, true, "offline") :
                 client.connect(clientId.c_str(), user.c_str(), password.c_str(), topic("availability").c_str(), 0, true, "offline");

@@ -66,6 +66,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     .btn-station:hover { border-color: var(--accent); background: #1e293b; }
     .btn-station .genre { display: block; font-size: 0.7rem; color: var(--text-muted); font-weight: normal; margin-top: 0.2rem; }
     .alarm-station-button { display: block; width: auto; margin: 1rem auto 0; padding: 0.55rem 0.8rem; font-size: 0.82rem; }
+    .hint { font-size: 0.8rem; color: var(--text-muted); }
+    .station-search { width: 100%; background: #0f172a; border: 1px solid var(--border); border-radius: 0.5rem; color: var(--text); padding: 0.6rem; font-size: 0.85rem; outline: none; margin-bottom: 0.5rem; }
+    .station-row { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0; border-bottom: 1px solid var(--border); }
+    .station-row-name { flex: 1; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .station-row button { padding: 0.35rem 0.55rem; font-size: 0.85rem; background: #0f172a; color: var(--text); border: 1px solid var(--border); }
+    .station-row button:hover { border-color: var(--accent); }
+    .pager { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-muted); }
+    .pager button { padding: 0.4rem 0.8rem; font-size: 0.8rem; background: #0f172a; color: var(--text); border: 1px solid var(--border); }
+    .pager button:disabled { opacity: 0.4; cursor: default; }
 
     .custom-url-box { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
     .custom-url-box input { flex: 1; background: #0f172a; border: 1px solid var(--border); border-radius: 0.5rem; color: var(--text); padding: 0.6rem; font-size: 0.85rem; outline: none; }
@@ -124,9 +133,19 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="card">
-      <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--accent);">Gespeicherte Sender</h3>
+      <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--accent);">Favoriten</h3>
       <div class="station-grid" id="presetList"></div>
       <button type="button" class="btn-primary alarm-station-button" id="saveRadioAlarm">⏰ Als Weckton speichern</button>
+
+      <h3 style="font-size: 0.9rem; margin-top: 1rem; margin-bottom: 0.4rem; color: var(--text-muted);">Senderliste</h3>
+      <input type="search" id="stationSearch" class="station-search" placeholder="Sender suchen...">
+      <div id="stationList"></div>
+      <div class="pager">
+        <button type="button" id="stationPrev">◀</button>
+        <span id="stationPageInfo">--</span>
+        <button type="button" id="stationNext">▶</button>
+      </div>
+      <div id="stationMsg" class="hint" style="margin-top: 0.5rem;"></div>
 
       <h3 style="font-size: 0.9rem; margin-top: 1rem; margin-bottom: 0.4rem; color: var(--text-muted);">Eigene Stream-URL</h3>
       <div class="custom-url-box">
@@ -156,14 +175,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <h3 style="font-size: 0.9rem; margin-top: 1rem; margin-bottom: 0.4rem; color: var(--text-muted);">M3U-Senderliste</h3>
       <form id="m3uForm" enctype="multipart/form-data">
         <input type="file" id="m3uFile" name="file" accept=".m3u,.m3u8,.txt" style="width: 100%; color: var(--text-muted); margin-bottom: 0.5rem;">
+        <select id="m3uMode" style="width: 100%; margin-bottom: 0.5rem;">
+          <option value="append">An bestehende Liste anhängen</option>
+          <option value="replace">Bestehende Liste ersetzen</option>
+        </select>
         <button type="submit" class="btn-primary">📂 M3U hochladen</button>
       </form>
       <div id="m3uMsg" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;"></div>
-
-      <h3 style="font-size: 0.9rem; margin-top: 1rem; margin-bottom: 0.4rem; color: var(--text-muted);">Sender löschen</h3>
-      <select id="stationSelect"></select>
-      <button type="button" class="btn-danger" id="deleteStation">🗑️ Ausgewählten Sender löschen</button>
-      <div id="stationMsg" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;"></div>
     </div>
 
     <div class="system-info">
@@ -174,37 +192,133 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   </div>
 
   <script>
-    function initPresets() {
-      const list = document.getElementById('presetList');
-      const select = document.getElementById('stationSelect');
-      list.innerHTML = '';
-      select.innerHTML = '';
-      fetch('/api/stations')
+    let favorites = [];
+    let stationPage = null;
+    let stationOffset = 0;
+    let stationQuery = '';
+    const STATION_PAGE_SIZE = 20;
+
+    function postForm(url, fields) {
+      return fetch(url, { method: 'POST', body: new URLSearchParams(fields) })
+        .then(res => res.ok ? res.text() : res.text().then(text => Promise.reject(text)));
+    }
+
+    function loadFavorites() {
+      return fetch('/api/favorites')
         .then(res => res.json())
         .then(data => {
-          const presets = data.stations || [];
-          if (!presets.length) {
-            const option = document.createElement('option');
-            option.innerText = 'Keine Sender gespeichert';
-            option.disabled = true;
-            option.selected = true;
-            select.appendChild(option);
+          favorites = data.favorites || [];
+          const list = document.getElementById('presetList');
+          list.innerHTML = '';
+          if (!favorites.length) {
+            const hint = document.createElement('div');
+            hint.className = 'hint';
+            hint.innerText = 'Noch keine Favoriten – in der Senderliste mit ☆ markieren.';
+            list.appendChild(hint);
           }
-          presets.forEach(p => {
+          favorites.forEach(f => {
             const btn = document.createElement('button');
             btn.className = 'btn-station';
-            btn.innerHTML = `<strong>${p.name}</strong>`;
-            btn.onclick = () => playPreset(p.id);
+            const label = document.createElement('strong');
+            label.textContent = f.name;
+            btn.appendChild(label);
+            btn.onclick = () => playFavorite(f.idx);
             list.appendChild(btn);
-
-            const option = document.createElement('option');
-            option.value = p.id;
-            option.innerText = p.name;
-            select.appendChild(option);
           });
+          renderStationPage();
         })
         .catch(err => console.error(err));
     }
+
+    function loadStations() {
+      const params = new URLSearchParams({ offset: stationOffset, limit: STATION_PAGE_SIZE, q: stationQuery });
+      document.getElementById('stationPageInfo').innerText = 'Lade...';
+      fetch('/api/stations?' + params)
+        .then(res => res.json())
+        .then(data => {
+          stationPage = data;
+          renderStationPage();
+        })
+        .catch(() => { document.getElementById('stationPageInfo').innerText = 'Fehler beim Laden'; });
+    }
+
+    function renderStationPage() {
+      if (!stationPage) return;
+      const box = document.getElementById('stationList');
+      box.innerHTML = '';
+      const stations = stationPage.stations || [];
+      if (!stations.length) {
+        const hint = document.createElement('div');
+        hint.className = 'hint';
+        hint.innerText = stationQuery ? 'Keine Treffer.' : 'Keine Sender gespeichert – M3U-Liste unter "Optionen" hochladen.';
+        box.appendChild(hint);
+      }
+      stations.forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'station-row';
+        const name = document.createElement('span');
+        name.className = 'station-row-name';
+        name.textContent = s.name;
+        name.title = s.url;
+        const fav = favorites.find(f => f.url === s.url);
+        const play = document.createElement('button');
+        play.innerText = '▶';
+        play.title = 'Abspielen';
+        play.onclick = () => playPreset(s.id);
+        const star = document.createElement('button');
+        star.innerText = fav ? '★' : '☆';
+        star.title = fav ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen';
+        star.onclick = () => toggleFavorite(s, fav);
+        const del = document.createElement('button');
+        del.innerText = '🗑';
+        del.title = 'Löschen';
+        del.onclick = () => deleteStation(s);
+        row.append(name, play, star, del);
+        box.appendChild(row);
+      });
+      const total = stationPage.total || 0;
+      const from = total ? stationOffset + 1 : 0;
+      const to = Math.min(stationOffset + STATION_PAGE_SIZE, total);
+      let info = from + '–' + to + ' von ' + total;
+      if (stationPage.storage === 'nvs') info += ' (ohne SD-Karte max. 24)';
+      document.getElementById('stationPageInfo').innerText = info;
+      document.getElementById('stationPrev').disabled = stationOffset === 0;
+      document.getElementById('stationNext').disabled = stationOffset + STATION_PAGE_SIZE >= total;
+    }
+
+    function toggleFavorite(station, fav) {
+      const msg = document.getElementById('stationMsg');
+      const request = fav ? postForm('/api/favorites/remove', { idx: fav.idx }) : postForm('/api/favorites/add', { id: station.id });
+      request
+        .then(() => { msg.innerText = ''; return loadFavorites(); })
+        .catch(error => { msg.innerText = 'Favorit konnte nicht geändert werden: ' + error; });
+    }
+
+    function deleteStation(station) {
+      if (!confirm('Sender "' + station.name + '" löschen?')) return;
+      const msg = document.getElementById('stationMsg');
+      postForm('/api/stations/delete', { id: station.id })
+        .then(() => { msg.innerText = 'Sender gelöscht.'; loadStations(); })
+        .catch(error => { msg.innerText = 'Löschen fehlgeschlagen: ' + error; });
+    }
+
+    let searchTimeout;
+    document.getElementById('stationSearch').addEventListener('input', event => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        stationQuery = event.target.value.trim();
+        stationOffset = 0;
+        loadStations();
+      }, 400);
+    });
+    document.getElementById('stationPrev').addEventListener('click', () => {
+      stationOffset = Math.max(0, stationOffset - STATION_PAGE_SIZE);
+      loadStations();
+    });
+    document.getElementById('stationNext').addEventListener('click', () => {
+      stationOffset += STATION_PAGE_SIZE;
+      loadStations();
+    });
 
     const optionsToggle = document.getElementById('optionsToggle');
     const advancedCard = document.getElementById('advancedCard');
@@ -276,31 +390,17 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       msg.innerText = 'M3U wird hochgeladen...';
       const data = new FormData();
       data.append('file', file);
-      fetch('/api/stations/m3u', { method: 'POST', body: data })
+      const mode = document.getElementById('m3uMode').value;
+      fetch('/api/stations/m3u?mode=' + encodeURIComponent(mode), { method: 'POST', body: data })
         .then(res => res.ok ? res.json() : res.text().then(text => Promise.reject(text)))
-        .then(() => {
-          msg.innerText = 'Senderliste gespeichert.';
-          initPresets();
+        .then(result => {
+          let text = result.imported + ' Sender importiert, insgesamt ' + result.total + '.';
+          if (result.storage === 'nvs') text += ' Ohne SD-Karte werden max. 24 Sender gespeichert.';
+          msg.innerText = text;
+          stationOffset = 0;
+          loadStations();
         })
         .catch(error => { msg.innerText = 'Upload fehlgeschlagen: ' + error; });
-    });
-
-    document.getElementById('deleteStation').addEventListener('click', () => {
-      const select = document.getElementById('stationSelect');
-      const msg = document.getElementById('stationMsg');
-      if (!select.value) {
-        msg.innerText = 'Kein Sender zum Löschen ausgewählt.';
-        return;
-      }
-      const data = new URLSearchParams();
-      data.append('id', select.value);
-      fetch('/api/stations/delete', { method: 'POST', body: data })
-        .then(res => res.ok ? res.text() : res.text().then(text => Promise.reject(text)))
-        .then(() => {
-          msg.innerText = 'Sender gelöscht.';
-          initPresets();
-        })
-        .catch(error => { msg.innerText = 'Löschen fehlgeschlagen: ' + error; });
     });
 
     document.getElementById('saveRadioAlarm').addEventListener('click', () => {
@@ -313,6 +413,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     function playPreset(id) {
       fetch('/api/station?id=' + id);
+      setTimeout(updateStatus, 300);
+    }
+
+    function playFavorite(idx) {
+      fetch('/api/favorite?idx=' + idx);
       setTimeout(updateStatus, 300);
     }
 
@@ -385,7 +490,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         .catch(err => console.error(err));
     }
 
-    initPresets();
+    loadFavorites();
+    loadStations();
     updateStatus();
     setInterval(updateStatus, 3000);
   </script>
