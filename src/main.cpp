@@ -978,3 +978,16 @@ void audio_eof_speech(const char *info) {
         resumeAfterAnnouncement();
     }
 }
+
+extern "C" void app_main(void)
+{
+    initArduino();
+
+    setup();
+
+    while (true)
+    {
+        loop();
+        delay(1);
+    }
+}
