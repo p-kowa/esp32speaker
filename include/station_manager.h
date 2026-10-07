@@ -14,8 +14,9 @@ static const char DIR[] = "/radio";
 static const char DATA[] = "/radio/stations.tsv";
 // Pro Sender ein uint32 mit dem Byte-Offset der Zeile in DATA
 static const char INDEX[] = "/radio/stations.idx";
-static const char DATA_TMP[] = "/radio/stations.new.tsv";
-static const char INDEX_TMP[] = "/radio/stations.new.idx";
+// FATFS ist ohne LFN gebaut: nur 8.3-Dateinamen
+static const char DATA_TMP[] = "/radio/newlist.tsv";
+static const char INDEX_TMP[] = "/radio/newlist.idx";
 }
 
 class StationManager {
@@ -352,6 +353,20 @@ public:
         replaceFilesWithTmp();
         refreshSdCount();
         return true;
+    }
+
+    bool clear() {
+        if (importing) return false;
+        if (!sdMode()) {
+            size_t previous = nvsCount;
+            nvsCount = 0;
+            persistList("stations", nvsStations, 0, previous);
+            return true;
+        }
+        removeIfExists(station_files::DATA);
+        removeIfExists(station_files::INDEX);
+        refreshSdCount();
+        return sdCount == 0;
     }
 
     // ---------- Streaming-Import (M3U) ----------
