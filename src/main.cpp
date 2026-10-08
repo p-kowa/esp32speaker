@@ -13,6 +13,9 @@
 #include "sd_manager.h"
 #include <vector>
 
+// Reserve fuer Webserver-Upload (M3U-Import) und Senderdatei-Zugriffe im loopTask
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+
 // Instanzen
 Audio audio;
 WebServer server(80);
