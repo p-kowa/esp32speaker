@@ -9,6 +9,7 @@ private:
     Preferences prefs;
     bool _isApMode = false;
     String _apSSID = "ESP32-Radio-Setup";
+    String _apPassword = "radio-setup";
 
     bool resetFileProcessed() {
         prefs.begin("wifi_config", true);
@@ -140,11 +141,12 @@ public:
     void startAP() {
         _isApMode = true;
         WiFi.mode(WIFI_AP_STA);
-        WiFi.softAP(_apSSID.c_str());
+        WiFi.softAP(_apSSID.c_str(), _apPassword.c_str());
         IPAddress apIP = WiFi.softAPIP();
         Serial.println("\n==========================================");
         Serial.println("  [WIFI-MGR] Hotspot Gestartet!");
         Serial.printf("  SSID: %s\n", _apSSID.c_str());
+        Serial.printf("  Passwort: %s\n", _apPassword.c_str());
         Serial.printf("  IP:   http://%s\n", apIP.toString().c_str());
         Serial.println("==========================================");
     }
