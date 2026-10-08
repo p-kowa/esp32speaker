@@ -781,8 +781,8 @@ void setup() {
     Serial.printf("[AUDIO] Gespeicherte Lautstaerke: %d\n", currentVolume);
 
     // WLAN Initialisierung (NVS -> STA -> AP Fallback)
-    wifiMgr.initWifi();
     sdMgr.begin();
+    wifiMgr.initWifi(sdMgr.isMounted() ? &sdMgr.filesystem() : nullptr);
     stationMgr.begin(sdMgr.isMounted() ? &sdMgr.filesystem() : nullptr);
     Serial.printf("[RADIO] %u Sender (%s), %u Favoriten\n", (unsigned)stationMgr.size(),
                   stationMgr.usesSd() ? "SD" : "NVS", (unsigned)stationMgr.favSize());

@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <FS.h>
 #include <WiFi.h>
 #include <Preferences.h>
 
@@ -8,6 +9,21 @@ private:
     Preferences prefs;
     bool _isApMode = false;
     String _apSSID = "ESP32-Radio-Setup";
+
+    bool resetFileProcessed() {
+        prefs.begin("wifi_config", true);
+        bool processed = prefs.getBool("reset_seen", false);
+        prefs.end();
+        return processed;
+    }
+
+    void setResetFileProcessed(bool processed) {
+        prefs.begin("wifi_config", false);
+        bool current = prefs.getBool("reset_seen", false);
+        if (processed && !current) prefs.putBool("reset_seen", true);
+        else if (!processed && current) prefs.remove("reset_seen");
+        prefs.end();
+    }
 
 public:
     void begin() {
@@ -134,7 +150,29 @@ public:
     }
 
     // Fuehrt die Initialisierung aus
-    bool initWifi(const String &fallbackSsid = "", const String &fallbackPass = "") {
+    bool initWifi(fs::FS *sdFs = nullptr, const String &fallbackSsid = "", const String &fallbackPass = "") {
+        bool resetRequested = sdFs && (sdFs->exists("/reset") || sdFs->exists("/clear"));
+        if (!resetRequested) {
+            setResetFileProcessed(false);
+        } else {
+            bool alreadyProcessed = resetFileProcessed();
+            bool removed = true;
+            if (sdFs->exists("/reset")) removed = sdFs->remove("/reset") && removed;
+            if (sdFs->exists("/clear")) removed = sdFs->remove("/clear") && removed;
+
+            if (!alreadyProcessed) {
+                clearCredentials();
+                setResetFileProcessed(true);
+                Serial.println("[WIFI-MGR] Reset-Datei erkannt: WLAN-Zugangsdaten werden geloescht.");
+                startAP();
+                return false;
+            }
+
+            if (!removed) {
+                Serial.println("[WIFI-MGR] Reset-Datei konnte nicht entfernt werden; WLAN-Daten bleiben erhalten.");
+            }
+        }
+
         String savedSsid, savedPass;
         loadCredentials(savedSsid, savedPass);
 
