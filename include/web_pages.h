@@ -130,10 +130,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="card">
-      <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--accent);">Favoriten</h3>
+      <div class="header-row" style="margin-bottom: 0.75rem;">
+        <h3 style="font-size: 1rem; color: var(--accent);">Favoriten</h3>
+        <label class="options-toggle"><input type="checkbox" id="showAllStations" aria-controls="stationBrowser"> Alle Sender anzeigen</label>
+      </div>
       <div class="station-grid" id="presetList"></div>
       <button type="button" class="btn-primary alarm-station-button" id="saveRadioAlarm">⏰ Als Weckton speichern</button>
 
+      <div id="stationBrowser" hidden>
       <h3 style="font-size: 0.9rem; margin-top: 1rem; margin-bottom: 0.4rem; color: var(--text-muted);">Senderliste</h3>
       <input type="search" id="stationSearch" class="station-search" placeholder="Sender suchen...">
       <div id="stationList"></div>
@@ -141,6 +145,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         <button type="button" id="stationPrev">◀</button>
         <span id="stationPageInfo">--</span>
         <button type="button" id="stationNext">▶</button>
+      </div>
       </div>
       <div id="stationMsg" class="hint" style="margin-top: 0.5rem;"></div>
 
@@ -185,6 +190,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     let stationOffset = 0;
     let stationQuery = '';
     const STATION_PAGE_SIZE = 20;
+    const showAllStations = document.getElementById('showAllStations');
+    const stationBrowser = document.getElementById('stationBrowser');
+    showAllStations.checked = localStorage.getItem('radioShowAllStations') === 'true';
+    stationBrowser.hidden = !showAllStations.checked;
+    showAllStations.addEventListener('change', () => {
+      localStorage.setItem('radioShowAllStations', showAllStations.checked);
+      stationBrowser.hidden = !showAllStations.checked;
+      if (showAllStations.checked) loadStations();
+    });
 
     function postForm(url, fields) {
       return fetch(url, { method: 'POST', body: new URLSearchParams(fields) })
@@ -219,6 +233,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     }
 
     function loadStations() {
+      if (stationBrowser.hidden) return;
       const params = new URLSearchParams({ offset: stationOffset, limit: STATION_PAGE_SIZE, q: stationQuery });
       document.getElementById('stationPageInfo').innerText = 'Lade...';
       fetch('/api/stations?' + params)
