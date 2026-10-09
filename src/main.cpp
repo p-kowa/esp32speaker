@@ -681,7 +681,6 @@ void stopPlayback() {
     audio.stopSong();
     isPlaying = false;
     savePersistedRadioPower(false);
-    currentStation = "Gestoppt";
     currentTitle = "--";
     currentBitrate = "--";
 }
@@ -689,6 +688,16 @@ void stopPlayback() {
 // Webserver Route: Stop
 void handleStop() {
     stopPlayback();
+    server.send(200, "text/plain", "OK");
+}
+
+void handleResume() {
+    if (currentStreamUrl.startsWith("http://") || currentStreamUrl.startsWith("https://")) {
+        startStream(currentStation, currentStreamUrl);
+    } else if (!startLastOrFirst()) {
+        server.send(409, "text/plain", "Kein Sender zum Fortsetzen gespeichert");
+        return;
+    }
     server.send(200, "text/plain", "OK");
 }
 
@@ -806,6 +815,7 @@ void setup() {
     server.on("/api/announce/volume", HTTP_GET, handleAnnounceVolume);
     server.on("/api/announce/volume", HTTP_POST, handleAnnounceVolume);
     server.on("/api/stop", HTTP_GET, handleStop);
+    server.on("/api/resume", HTTP_GET, handleResume);
     server.on("/api/volume", HTTP_GET, handleVolume);
     server.on("/api/wifi/scan", HTTP_GET, handleWifiScan);
     server.on("/api/wifi/save", HTTP_POST, handleWifiSave);
