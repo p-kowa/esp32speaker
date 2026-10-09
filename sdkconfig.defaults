@@ -1,6 +1,9 @@
 # FreeRTOS Tick Rate
 CONFIG_FREERTOS_HZ=1000
 
+# Volle CPU-Leistung fuer Audio-Dekodierung + Wake-Word-Erkennung
+CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240=y
+
 # setup()/loop() laufen in app_main -> großer Stack nötig
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 
@@ -27,3 +30,7 @@ CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
 # mbedTLS PSK-Optionen (behebt Compiler-Warnung)
 CONFIG_MBEDTLS_PSK_MODES=y
 CONFIG_MBEDTLS_KEY_EXCHANGE_PSK=y
+
+# Lange Dateinamen auf der SD-Karte (z. B. /wakeword/franiu.tflite)
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255

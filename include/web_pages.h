@@ -101,6 +101,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           <a href="/alarm" class="btn-settings">⏰ Wecker</a>
           <a href="/setup" class="btn-settings">⚙️ WLAN</a>
           <a href="/sdcard" class="btn-settings">💾 MicroSD</a>
+          <a href="/wakeword" class="btn-settings">🎙️ Wake Word</a>
+          <a href="/tongenerator" class="btn-settings">🎵 Tongenerator</a>
         </div>
       </div>
       <div class="subtitle">Audio Streamer</div>
@@ -1288,3 +1290,1201 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
+const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wake Word - ESP32 Radio</title>
+  <style>
+    :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#f8fafc; --muted:#94a3b8; --accent:#38bdf8; --ok:#34d399; --bad:#f87171; }
+    * { box-sizing:border-box; }
+    body { margin:0; padding:1.5rem; min-height:100vh; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:640px; margin:auto; }
+    section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1.25rem; margin-bottom:1rem; }
+    h1 { margin:0 0 .25rem; color:var(--accent); font-size:1.5rem; }
+    p { color:var(--muted); margin:.25rem 0 1rem; }
+    code { color:var(--text); }
+    .actions { display:flex; gap:.75rem; flex-wrap:wrap; }
+    button { flex:1 1 180px; min-height:44px; border:0; border-radius:7px; padding:.7rem 1rem; font-weight:700; cursor:pointer; color:#082f49; background:var(--accent); }
+    button.secondary { color:var(--text); background:#334155; }
+    button:disabled { opacity:.5; cursor:default; }
+    button:hover:not(:disabled) { filter:brightness(1.12); }
+    #status { display:none; padding:.7rem; margin-bottom:1rem; border-radius:7px; }
+    #status.ok { display:block; color:var(--ok); border:1px solid var(--ok); background:#064e3b44; }
+    #status.bad { display:block; color:var(--bad); border:1px solid var(--bad); background:#7f1d1d44; }
+    .current { font-size:1.1rem; font-weight:700; margin-bottom:1rem; }
+    .model { display:flex; align-items:center; gap:.75rem; padding:.8rem 0; border-top:1px solid var(--line); }
+    .model.active .name { color:var(--ok); }
+    .info { flex:1; min-width:0; overflow-wrap:anywhere; }
+    .name { font-weight:700; }
+    .meta { color:var(--muted); font-size:.85rem; margin-top:.2rem; }
+    .model button { flex:0 0 auto; min-height:36px; padding:.5rem .7rem; }
+    .empty { color:var(--muted); padding:.75rem 0; }
+    .meter { height:10px; background:#0b1220; border:1px solid var(--line); border-radius:6px; overflow:hidden; margin:.5rem 0 .25rem; }
+    #probFill { height:100%; width:0; background:var(--accent); transition:width .2s; }
+    #probFill.hit { background:var(--ok); }
+    #detector, #probText { margin-bottom:.5rem; }
+    a { color:var(--muted); display:block; text-align:center; margin-top:1rem; text-decoration:none; }
+    a:hover { color:var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>🎙️ Wake Word</h1>
+      <p>microWakeWord-Modelle (<code>name.tflite</code> + <code>name.json</code>) im Ordner <code id="folder">/wakeword</code> der MicroSD-Karte.</p>
+      <label class="options-toggle"><input type="checkbox" id="optionsWwToggle"> Optionen</label>
+      <div id="status" role="status"></div>
+      <div class="current">Aktiv: <span id="current">-</span></div>
+      <div class="meta" id="detector">Erkennung: -</div>
+      <div class="meter"><div id="probFill"></div></div>
+      <div class="meta" id="probText">Wahrscheinlichkeit: -</div>
+      <div class="actions">
+        <button class="secondary" id="disableBtn" onclick="select('')">✕ Wake Word deaktivieren</button>
+        <button class="secondary" onclick="load()">↻ Aktualisieren</button>
+      </div>
+    </section>
+    <section>
+      <div id="modelList"><div class="empty">Modelle werden geladen ...</div></div>
+    </section>
+    <a href="/">← Zurück zum Radio</a>
+  <section>
+  <div class="card advanced-card" id="advancedWwCard">
+<h3 style="
+    font-size: 0.9rem;
+    margin-top: 1rem;
+    margin-bottom: 0.6rem;
+    color: var(--text-muted);">
+    🎤 Wake Word Erkennung
+</h3>
+
+<div class="volume-box">
+    <div class="volume-label">
+        <label for="probabilityCutoff">Schwellwert</label>
+        <span id="probabilityCutoffValue">0.50</span>
+    </div>
+    <input
+        type="range"
+        id="probabilityCutoff"
+        min="0"
+        max="1"
+        step="0.05"
+        value="0.5">
+    <small style="color: var(--text-muted);">
+        Je höher, desto sicherer muss das Wake Word erkannt werden.
+    </small>
+</div>
+
+<div class="volume-box" style="margin-top:0.75rem;">
+    <div class="volume-label">
+        <label for="slidingWindowSize">Fenstergröße</label>
+        <span id="slidingWindowSizeValue">5</span>
+    </div>
+    <input
+        type="range"
+        id="slidingWindowSize"
+        min="1"
+        max="10"
+        step="1"
+        value="5">
+    <small style="color: var(--text-muted);">
+        Anzahl der Auswertungen für die Mittelung.
+    </small>
+</div>
+
+  <div class="volume-box" style="margin-top:0.75rem;">
+    <div class="volume-label">
+      <label for="endOfSpeechSilence">Stille bis Satzende</label>
+      <span id="endOfSpeechSilenceValue">1.000 ms</span>
+    </div>
+    <input
+      type="range"
+      id="endOfSpeechSilence"
+      min="0"
+      max="3000"
+      step="100"
+      value="1000">
+    <small style="color: var(--text-muted);">
+      Stillezeit nach dem Sprechen, bevor die Aufnahme endet.
+    </small>
+  </div>
+
+<button
+    type="button"
+    class="btn-primary"
+    id="saveMicroConfig"
+    style="width:100%; margin-top:1rem;">
+    💾 Wake Word Einstellungen speichern
+</button>
+
+<div id="microConfigMsg"
+     style="font-size:0.8rem; color:var(--text-muted); margin-top:0.4rem;">
+</div>
+    </div>
+  </section>
+  </main>
+  <script>
+    const list = document.getElementById('modelList');
+    const status = document.getElementById('status');
+    function message(text, good) {
+      status.textContent = text;
+      status.className = good ? 'ok' : 'bad';
+    }
+    function empty(text) {
+      const div = document.createElement('div');
+      div.className = 'empty';
+      div.textContent = text;
+      list.replaceChildren(div);
+    }
+    function row(model, selected) {
+      const item = document.createElement('div');
+      item.className = 'model' + (model.name === selected ? ' active' : '');
+      const info = document.createElement('div');
+      info.className = 'info';
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = (model.wake_word || model.name) + (model.name === selected ? ' ✓' : '');
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const parts = [model.name + '.tflite', Math.round(model.size / 1024) + ' KB'];
+      if (model.manifest) {
+        if (model.cutoff) parts.push('Schwelle ' + model.cutoff);
+        if (model.window) parts.push('Fenster ' + model.window);
+      } else {
+        parts.push('⚠ ' + model.name + '.json fehlt');
+      }
+      meta.textContent = parts.join(' · ');
+      info.append(name, meta);
+      const use = document.createElement('button');
+      use.textContent = model.name === selected ? 'Aktiv' : 'Verwenden';
+      use.disabled = model.name === selected || !model.manifest;
+      use.onclick = () => select(model.name);
+      item.append(info, use);
+      return item;
+    }
+    async function load() {
+      try {
+        const data = await fetch('/api/wakeword/list').then(response => response.json());
+        document.getElementById('folder').textContent = data.path;
+        document.getElementById('current').textContent = data.selected || 'keins';
+        document.getElementById('disableBtn').disabled = !data.selected;
+        endOfSpeechSilence.value = data.end_of_speech_silence_ms ?? 1000;
+        updateWakeWordStatus();
+        const selectedModel = data.models.find(model => model.name === data.selected);
+        if (selectedModel) {
+          if (selectedModel.cutoff !== '') probabilityCutoff.value = selectedModel.cutoff;
+          if (selectedModel.window !== '') slidingWindowSize.value = selectedModel.window;
+          updateWakeWordStatus();
+        }
+        if (!data.sd) { empty('Keine MicroSD-Karte eingelegt.'); message('MicroSD-Karte nicht verfügbar.', false); return; }
+        if (!data.folder) { empty('Ordner ' + data.path + ' konnte nicht angelegt werden.'); message('Ordnerfehler auf der MicroSD-Karte.', false); return; }
+        if (!data.models.length) { empty('Keine Modelle gefunden. Kopiere name.tflite und name.json nach ' + data.path + '.'); status.className = ''; return; }
+        list.replaceChildren(...data.models.map(model => row(model, data.selected)));
+        status.className = '';
+      } catch (error) { empty('Modelle konnten nicht geladen werden.'); message(error.message, false); }
+    }
+    async function select(name) {
+      try {
+        const response = await fetch('/api/wakeword/select', { method:'POST', body:new URLSearchParams({ name }) });
+        const text = await response.text();
+        if (!response.ok) throw new Error(text || 'Auswahl fehlgeschlagen');
+        message(name ? 'Wake Word "' + name + '" gespeichert.' : 'Wake Word deaktiviert.', true);
+        load();
+      } catch (error) { message(error.message, false); }
+    }
+    let lastDetections = null;
+    async function pollStatus() {
+      try {
+        const s = await fetch('/api/wakeword/status').then(response => response.json());
+        const detector = document.getElementById('detector');
+        detector.textContent = 'Erkennung: ' + (s.running ? 'läuft' : 'aus') + (s.error ? ' – ' + s.error : '') + ' · erkannt: ' + s.detections;
+        const fill = document.getElementById('probFill');
+        fill.style.width = Math.round(s.peak * 100) + '%';
+        document.getElementById('probText').textContent = 'Wahrscheinlichkeit: ' + s.peak.toFixed(2);
+        if (lastDetections !== null && s.detections > lastDetections) {
+          fill.classList.add('hit');
+          message('Wake Word erkannt!', true);
+          setTimeout(() => fill.classList.remove('hit'), 1500);
+        }
+        lastDetections = s.detections;
+      } catch (error) { document.getElementById('detector').textContent = 'Erkennung: Status nicht erreichbar'; }
+    }
+    setInterval(pollStatus, 500);
+	const optionsToggle =
+    document.getElementById('optionsWwToggle');
+
+const advancedCard =
+    document.getElementById('advancedWwCard');
+
+optionsToggle.checked =
+    localStorage.getItem('wakewordOptions') === 'true';
+
+advancedCard.style.display =
+    optionsToggle.checked ? 'block' : 'none';
+
+optionsToggle.addEventListener('change', () => {
+
+    localStorage.setItem(
+        'wakewordOptions',
+        optionsToggle.checked
+    );
+
+    advancedCard.style.display =
+        optionsToggle.checked ? 'block' : 'none';
+});
+
+const probabilityCutoff =
+    document.getElementById('probabilityCutoff');
+
+const probabilityCutoffValue =
+    document.getElementById('probabilityCutoffValue');
+
+const slidingWindowSize =
+    document.getElementById('slidingWindowSize');
+
+const slidingWindowSizeValue =
+    document.getElementById('slidingWindowSizeValue');
+const endOfSpeechSilence =
+  document.getElementById('endOfSpeechSilence');
+const endOfSpeechSilenceValue =
+  document.getElementById('endOfSpeechSilenceValue');
+
+function updateWakeWordStatus() {
+
+    probabilityCutoffValue.textContent =
+        Number(probabilityCutoff.value).toFixed(2);
+
+    slidingWindowSizeValue.textContent =
+        slidingWindowSize.value;
+    endOfSpeechSilenceValue.textContent =
+      Number(endOfSpeechSilence.value).toLocaleString('de-DE') + ' ms';
+}
+
+probabilityCutoff.addEventListener(
+    'input',
+    updateWakeWordStatus
+);
+
+slidingWindowSize.addEventListener(
+    'input',
+    updateWakeWordStatus
+);
+endOfSpeechSilence.addEventListener(
+  'input',
+  updateWakeWordStatus
+);
+
+updateWakeWordStatus();
+
+document
+    .getElementById('saveMicroConfig')
+    .addEventListener('click', async () => {
+
+        const payload = {
+            probability_cutoff:
+            probabilityCutoff.value,
+
+            sliding_window_size:
+            slidingWindowSize.value,
+
+            end_of_speech_silence_ms:
+            endOfSpeechSilence.value
+        };
+
+        try {
+
+            const response =
+            await fetch('/api/wakeword/settings', {
+                    method: 'POST',
+              body: new URLSearchParams(payload)
+                });
+
+          const result = await response.text();
+          document.getElementById('microConfigMsg').textContent = response.ok
+            ? 'Einstellungen gespeichert und Erkennung neu gestartet.'
+            : 'Speichern fehlgeschlagen: ' + result;
+          if (response.ok) load();
+
+        } catch {
+
+            document
+                .getElementById('microConfigMsg')
+                .textContent =
+                    '❌ Server nicht erreichbar';
+        }
+});
+    load();
+  </script>
+</body>
+</html>
+)rawliteral";
+
+// ==========================================
+// 4. MicroSD Web-Oberfläche
+// ==========================================
+const char TONGENERATOR_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="de" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sequenz-Ton-Generator</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Google Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['Fira Code', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              500: '#06b6d4',
+              600: '#0891b2',
+              900: '#083344',
+            },
+            accent: {
+              purple: '#a855f7',
+              pink: '#ec4899',
+              cyan: '#06b6d4',
+              green: '#10b981'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #0b0f17;
+      color: #f3f4f6;
+    }
+    .neon-border {
+      box-shadow: 0 0 15px rgba(6, 182, 212, 0.15);
+    }
+    .neon-border:focus-within {
+      box-shadow: 0 0 20px rgba(6, 182, 212, 0.35);
+    }
+    .active-row {
+      background-color: rgba(6, 182, 212, 0.15) !important;
+      border-left: 4px solid #06b6d4 !important;
+    }
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #111827;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #374151;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #4b5563;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col font-sans antialiased bg-[#0b0f17] text-gray-100">
+
+  <!-- Header -->
+  <header class="border-b border-gray-800 bg-[#111827]/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg text-cyan-400">
+          <i data-lucide="audio-wave" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-lg tracking-tight bg-gradient-to-r from-cyan-400 via-teal-300 to-indigo-400 bg-clip-text text-transparent">
+            Sequenz-Ton-Generator
+          </h1>
+          <p class="text-xs text-gray-400 hidden sm:block">Audio-Frequenz-Sequenzer & Web-Audio Synthesizer</p>
+        </div>
+      </div>
+
+      <!-- Quick Preset Selector -->
+      <div class="flex items-center space-x-2">
+        <span class="text-xs text-gray-400 hidden md:inline">Presets:</span>
+        <select id="presetSelect" onchange="loadPreset(this.value)" class="bg-gray-800 border border-gray-700 text-xs text-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-cyan-500 cursor-pointer">
+          <option value="user_default">Dein Dreiklang (800/1100/1600)</option>
+          <option value="r2d2">R2-D2 Droid Beep</option>
+          <option value="jump">8-Bit Jump Sound</option>
+          <option value="chime">Erfolgs-Chime</option>
+          <option value="arpeggio">Moll Arpeggio</option>
+          <option value="alarm">Warn-Signal</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Layout -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- Left Column: Controls & Visualizer + Sequence Editor (Cols 7) -->
+    <section class="lg:col-span-7 flex flex-col space-y-6">
+      
+      <!-- Visualizer & Master Control Box -->
+      <div class="bg-gray-900/90 border border-gray-800 rounded-2xl p-5 shadow-xl backdrop-blur relative overflow-hidden">
+        <!-- Canvas Waveform Visualizer -->
+        <div class="relative w-full h-36 bg-gray-950 rounded-xl border border-gray-800/80 overflow-hidden mb-5">
+          <canvas id="visualizerCanvas" class="w-full h-full block"></canvas>
+          <div class="absolute top-2 left-3 text-[10px] font-mono text-cyan-400/70 uppercase tracking-wider flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span> Oszilloskop Signal-Anzeige
+          </div>
+          <div id="playingBadge" class="hidden absolute top-2 right-3 text-[11px] font-mono bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-2 py-0.5 rounded-full items-center gap-1">
+            <i data-lucide="play" class="w-3 h-3 fill-current"></i> Wiedergabe aktiv
+          </div>
+        </div>
+
+        <!-- Master Playback Controls -->
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div class="flex items-center space-x-3">
+            <button id="playBtn" onclick="togglePlaySequence()" class="flex items-center space-x-2 bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-gray-950 font-bold px-5 py-2.5 rounded-xl transition-all shadow-lg shadow-cyan-500/20 active:scale-95">
+              <i data-lucide="play" class="w-5 h-5 fill-current"></i>
+              <span id="playBtnText">Sequenz Abspielen</span>
+            </button>
+
+            <button id="loopBtn" onclick="toggleLoop()" class="flex items-center space-x-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 px-3 py-2.5 rounded-xl text-sm font-medium transition-all">
+              <i data-lucide="repeat" class="w-4 h-4"></i>
+              <span id="loopLabel">Endlosschleife: Aus</span>
+            </button>
+          </div>
+
+          <!-- Volume Slider -->
+          <div class="flex items-center space-x-3 bg-gray-950/60 border border-gray-800 px-3 py-2 rounded-xl">
+            <i data-lucide="volume-2" class="w-4 h-4 text-gray-400"></i>
+            <input type="range" id="masterVolume" min="0" max="1" step="0.01" value="0.7" class="w-24 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-400" oninput="updateVolume(this.value)">
+            <span id="volValue" class="text-xs font-mono text-gray-400 w-8">70%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tone Sequence Editor Table -->
+      <div class="bg-gray-900/90 border border-gray-800 rounded-2xl p-5 shadow-xl flex-1 flex flex-col">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-base font-semibold text-gray-100 flex items-center gap-2">
+              <i data-lucide="list-music" class="w-5 h-5 text-cyan-400"></i> Ton-Sequenz Schritte
+            </h2>
+            <p class="text-xs text-gray-400">Frequenzen (Hz) & Dauern (ms) verwalten</p>
+          </div>
+          
+          <div class="flex items-center space-x-2">
+            <button onclick="addToneRow()" class="flex items-center space-x-1 text-xs bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 font-medium px-3 py-1.5 rounded-lg transition-all">
+              <i data-lucide="plus" class="w-4 h-4"></i>
+              <span>Ton hinzufügen</span>
+            </button>
+            <button onclick="clearSequence()" class="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-medium px-3 py-1.5 rounded-lg transition-all">
+              Leeren
+            </button>
+          </div>
+        </div>
+
+        <!-- Scrollable Steps Table -->
+        <div class="overflow-x-auto rounded-xl border border-gray-800 bg-gray-950/40 flex-1 min-h-[250px] max-h-[420px]">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-gray-900/90 text-gray-400 uppercase font-mono tracking-wider text-[11px] border-b border-gray-800 sticky top-0 z-10">
+              <tr>
+                <th class="py-3 px-3 w-10 text-center">#</th>
+                <th class="py-3 px-3">Frequenz (Hz)</th>
+                <th class="py-3 px-3">Dauer (ms)</th>
+                <th class="py-3 px-3">Wellenform</th>
+                <th class="py-3 px-3 text-center">Test</th>
+                <th class="py-3 px-3 text-right">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody id="sequenceTableBody" class="divide-y divide-gray-800/60 font-mono">
+              <!-- Rows inserted dynamically via JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Total Stats Footer -->
+        <div class="mt-4 pt-3 border-t border-gray-800 flex justify-between items-center text-xs text-gray-400 font-mono">
+          <span>Töne gesamt: <strong id="totalTonesCount" class="text-cyan-400">3</strong></span>
+          <span>Gesamtdauer: <strong id="totalDurationCount" class="text-cyan-400">360 ms</strong></span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Right Column: Code Generator & Export Tools (Cols 5) -->
+    <section class="lg:col-span-5 flex flex-col space-y-6">
+
+      <!-- Code Export Box -->
+      <div class="bg-gray-900/90 border border-gray-800 rounded-2xl p-5 shadow-xl flex-1 flex flex-col">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-base font-semibold text-gray-100 flex items-center gap-2">
+            <i data-lucide="code" class="w-5 h-5 text-purple-400"></i> Code-Generierung
+          </h2>
+
+          <!-- Tab buttons for Code Languages -->
+          <div class="flex bg-gray-950 border border-gray-800 p-0.5 rounded-lg text-[11px]">
+            <button id="tabJs" onclick="switchCodeTab('js')" class="px-2.5 py-1 rounded-md font-medium text-cyan-400 bg-gray-800 shadow">JavaScript</button>
+            <button id="tabArduino" onclick="switchCodeTab('arduino')" class="px-2.5 py-1 rounded-md font-medium text-gray-400 hover:text-gray-200">Arduino / C++</button>
+            <button id="tabJson" onclick="switchCodeTab('json')" class="px-2.5 py-1 rounded-md font-medium text-gray-400 hover:text-gray-200">JSON</button>
+          </div>
+        </div>
+
+        <p class="text-xs text-gray-400 mb-3">
+          Generierter Code zum direkten Einbauen in deine eigenen Projekte:
+        </p>
+
+        <!-- Code Snippet Display -->
+        <div class="relative flex-1 bg-gray-950 border border-gray-800 rounded-xl p-3 font-mono text-xs text-cyan-300 overflow-hidden flex flex-col min-h-[260px]">
+          <pre id="codeOutput" class="overflow-auto flex-1 text-[11px] leading-relaxed select-all text-gray-300"></pre>
+
+          <button onclick="copyCodeToClipboard()" class="absolute top-2.5 right-2.5 bg-gray-800/90 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-lg px-2.5 py-1.5 text-[11px] flex items-center gap-1 transition-all shadow">
+            <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+            <span id="copyBtnText">Kopieren</span>
+          </button>
+        </div>
+
+        <!-- Import / Export Controls -->
+        <div class="mt-4 pt-3 border-t border-gray-800 flex items-center justify-between gap-2">
+          <button onclick="downloadJson()" class="flex-1 flex items-center justify-center space-x-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-xs py-2 rounded-xl transition-all">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            <span>JSON Download</span>
+          </button>
+
+          <label class="flex-1 flex items-center justify-center space-x-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-xs py-2 rounded-xl transition-all cursor-pointer">
+            <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+            <span>JSON Laden</span>
+            <input type="file" id="jsonInput" accept=".json" onchange="importJson(event)" class="hidden">
+          </label>
+        </div>
+      </div>
+
+      <!-- User Guide Card -->
+      <div class="bg-gradient-to-br from-cyan-950/30 to-purple-950/20 border border-cyan-500/20 rounded-2xl p-4 text-xs text-gray-300 space-y-2">
+        <h3 class="font-semibold text-cyan-300 flex items-center gap-1.5">
+          <i data-lucide="info" class="w-4 h-4"></i> Wie funktioniert der Synthesizer?
+        </h3>
+        <p class="text-gray-400 leading-relaxed">
+          Dieses Tool nutzt die native <strong>Web Audio API</strong> deines Browsers. Jeder Ton wird durch einen virtuellen Oszillator erzeugt. Die Frequenz definiert die Tonhöhe in Hertz (Hz), und die Dauer bestimmt das Timing in Millisekunden (ms).
+        </p>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- Notification Toast Container -->
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+  <!-- JavaScript Application Logic -->
+  <script>
+    // Default 3-tone sequence as requested by user
+    let sequence = [
+      { freq: 800, duration: 80, type: 'sine' },
+      { freq: 1100, duration: 100, type: 'sine' },
+      { freq: 1600, duration: 180, type: 'sine' }
+    ];
+
+    let audioCtx = null;
+    let isPlaying = false;
+    let isLooping = false;
+    let masterGainNode = null;
+    let activeOscillators = [];
+    let currentPlaybackTimeout = null;
+    let activeTab = 'js'; // 'js', 'arduino', 'json'
+    let activeRowIndex = -1;
+
+    // Presets catalog
+    const PRESETS = {
+      user_default: [
+        { freq: 800, duration: 80, type: 'sine' },
+        { freq: 1100, duration: 100, type: 'sine' },
+        { freq: 1600, duration: 180, type: 'sine' }
+      ],
+      r2d2: [
+        { freq: 1500, duration: 60, type: 'sine' },
+        { freq: 2200, duration: 80, type: 'sine' },
+        { freq: 1200, duration: 50, type: 'triangle' },
+        { freq: 2800, duration: 120, type: 'sine' },
+        { freq: 1800, duration: 90, type: 'sine' }
+      ],
+      jump: [
+        { freq: 150, duration: 40, type: 'square' },
+        { freq: 300, duration: 40, type: 'square' },
+        { freq: 600, duration: 60, type: 'square' },
+        { freq: 1200, duration: 120, type: 'square' }
+      ],
+      chime: [
+        { freq: 523, duration: 100, type: 'sine' }, // C5
+        { freq: 659, duration: 100, type: 'sine' }, // E5
+        { freq: 784, duration: 100, type: 'sine' }, // G5
+        { freq: 1046, duration: 250, type: 'sine' } // C6
+      ],
+      arpeggio: [
+        { freq: 440, duration: 90, type: 'triangle' }, // A4
+        { freq: 523, duration: 90, type: 'triangle' }, // C5
+        { freq: 659, duration: 90, type: 'triangle' }, // E5
+        { freq: 880, duration: 180, type: 'triangle' } // A5
+      ],
+      alarm: [
+        { freq: 880, duration: 100, type: 'sawtooth' },
+        { freq: 440, duration: 100, type: 'sawtooth' },
+        { freq: 880, duration: 100, type: 'sawtooth' },
+        { freq: 440, duration: 100, type: 'sawtooth' }
+      ]
+    };
+
+    let analyserNode = null;
+    let canvas, canvasCtx;
+
+    window.onload = function() {
+      lucide.createIcons();
+      initCanvas();
+      renderSequenceTable();
+      updateCodeOutput();
+      
+      // Resize listener for visualizer
+      window.addEventListener('resize', resizeCanvas);
+    };
+
+    function initAudioContext() {
+      if (!audioCtx) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContext();
+
+        analyserNode = audioCtx.createAnalyser();
+        analyserNode.fftSize = 2048;
+
+        masterGainNode = audioCtx.createGain();
+        const volVal = parseFloat(document.getElementById('masterVolume').value);
+        masterGainNode.gain.setValueAtTime(volVal, audioCtx.currentTime);
+
+        masterGainNode.connect(analyserNode);
+        analyserNode.connect(audioCtx.destination);
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function initCanvas() {
+      canvas = document.getElementById('visualizerCanvas');
+      canvasCtx = canvas.getContext('2d');
+      resizeCanvas();
+      drawVisualizer();
+    }
+
+    function resizeCanvas() {
+      if (!canvas) return;
+      canvas.width = canvas.parentElement.clientWidth * window.devicePixelRatio || 300;
+      canvas.height = canvas.parentElement.clientHeight * window.devicePixelRatio || 150;
+    }
+
+    // Live Oscilloscope Waveform Animation
+    function drawVisualizer() {
+      requestAnimationFrame(drawVisualizer);
+      if (!canvasCtx || !canvas) return;
+
+      const width = canvas.width;
+      const height = canvas.height;
+
+      canvasCtx.fillStyle = '#030712';
+      canvasCtx.fillRect(0, 0, width, height);
+
+      // Grid overlay
+      canvasCtx.strokeStyle = '#111827';
+      canvasCtx.lineWidth = 1;
+      for (let x = 0; x < width; x += 40) {
+        canvasCtx.beginPath();
+        canvasCtx.moveTo(x, 0);
+        canvasCtx.lineTo(x, height);
+        canvasCtx.stroke();
+      }
+      for (let y = 0; y < height; y += 30) {
+        canvasCtx.beginPath();
+        canvasCtx.moveTo(0, y);
+        canvasCtx.lineTo(width, y);
+        canvasCtx.stroke();
+      }
+
+      if (!analyserNode || !isPlaying) {
+        // Draw flat line when idle
+        canvasCtx.beginPath();
+        canvasCtx.strokeStyle = '#0891b2';
+        canvasCtx.lineWidth = 2;
+        canvasCtx.moveTo(0, height / 2);
+        canvasCtx.lineTo(width, height / 2);
+        canvasCtx.stroke();
+        return;
+      }
+
+      const bufferLength = analyserNode.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      analyserNode.getByteTimeDomainData(dataArray);
+
+      canvasCtx.lineWidth = 2.5;
+      canvasCtx.strokeStyle = '#06b6d4';
+      canvasCtx.shadowBlur = 8;
+      canvasCtx.shadowColor = '#06b6d4';
+      canvasCtx.beginPath();
+
+      const sliceWidth = width / bufferLength;
+      let x = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0;
+        const y = (v * height) / 2;
+
+        if (i === 0) {
+          canvasCtx.moveTo(x, y);
+        } else {
+          canvasCtx.lineTo(x, y);
+        }
+        x += sliceWidth;
+      }
+
+      canvasCtx.lineTo(width, height / 2);
+      canvasCtx.stroke();
+      canvasCtx.shadowBlur = 0; // Reset shadow for performance
+    }
+
+    function updateVolume(val) {
+      document.getElementById('volValue').innerText = Math.round(val * 100) + '%';
+      if (masterGainNode && audioCtx) {
+        masterGainNode.gain.setValueAtTime(parseFloat(val), audioCtx.currentTime);
+      }
+    }
+
+    function togglePlaySequence() {
+      if (isPlaying) {
+        stopSequence();
+      } else {
+        startSequencePlayback();
+      }
+    }
+
+    function toggleLoop() {
+      isLooping = !isLooping;
+      const loopLabel = document.getElementById('loopLabel');
+      const loopBtn = document.getElementById('loopBtn');
+      if (isLooping) {
+        loopLabel.innerText = "Endlosschleife: An";
+        loopBtn.classList.add('border-cyan-500', 'text-cyan-400', 'bg-cyan-500/10');
+      } else {
+        loopLabel.innerText = "Endlosschleife: Aus";
+        loopBtn.classList.remove('border-cyan-500', 'text-cyan-400', 'bg-cyan-500/10');
+      }
+    }
+
+    function playSingleTone(index) {
+      initAudioContext();
+      const tone = sequence[index];
+      if (!tone) return;
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc.type = tone.type || 'sine';
+      osc.frequency.setValueAtTime(tone.freq, audioCtx.currentTime);
+
+      // Envelope to prevent click sounds
+      const now = audioCtx.currentTime;
+      const durationSec = tone.duration / 1000;
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(1, now + 0.005);
+      gain.gain.setValueAtTime(1, now + Math.max(0, durationSec - 0.005));
+      gain.gain.linearRampToValueAtTime(0, now + durationSec);
+
+      osc.connect(gain);
+      gain.connect(masterGainNode);
+
+      osc.start(now);
+      osc.stop(now + durationSec);
+
+      // Highlight single row briefly
+      highlightRow(index);
+      setTimeout(() => unhighlightRow(index), tone.duration);
+    }
+
+    function startSequencePlayback() {
+      if (sequence.length === 0) {
+        showToast('Keine Töne in der Sequenz vorhanden!', 'error');
+        return;
+      }
+
+      initAudioContext();
+      isPlaying = true;
+      updateUIPlaybackState(true);
+
+      let startTime = audioCtx.currentTime + 0.05; // Short delay
+      let accumulatedDelayMs = 50;
+
+      sequence.forEach((tone, idx) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+
+        osc.type = tone.type || 'sine';
+        osc.frequency.setValueAtTime(tone.freq, startTime);
+
+        // Micro envelope for soft transition
+        const durSec = tone.duration / 1000;
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(1, startTime + 0.005);
+        gain.gain.setValueAtTime(1, startTime + Math.max(0, durSec - 0.005));
+        gain.gain.linearRampToValueAtTime(0, startTime + durSec);
+
+        osc.connect(gain);
+        gain.connect(masterGainNode);
+
+        osc.start(startTime);
+        osc.stop(startTime + durSec);
+        activeOscillators.push(osc);
+
+        // Schedule visual row highlight
+        const currentDelay = accumulatedDelayMs;
+        setTimeout(() => {
+          if (isPlaying) {
+            highlightRow(idx);
+          }
+        }, currentDelay);
+
+        startTime += durSec;
+        accumulatedDelayMs += tone.duration;
+      });
+
+      // Schedule completion / loop
+      currentPlaybackTimeout = setTimeout(() => {
+        unhighlightAllRows();
+        if (isLooping && isPlaying) {
+          startSequencePlayback();
+        } else {
+          stopSequence();
+        }
+      }, accumulatedDelayMs);
+    }
+
+    function stopSequence() {
+      isPlaying = false;
+      if (currentPlaybackTimeout) clearTimeout(currentPlaybackTimeout);
+      activeOscillators.forEach(osc => {
+        try { osc.stop(); } catch(e) {}
+      });
+      activeOscillators = [];
+      unhighlightAllRows();
+      updateUIPlaybackState(false);
+    }
+
+    function updateUIPlaybackState(playing) {
+      const btnText = document.getElementById('playBtnText');
+      const badge = document.getElementById('playingBadge');
+      const btn = document.getElementById('playBtn');
+
+      if (playing) {
+        btnText.innerText = "Stoppen";
+        badge.classList.remove('hidden');
+        badge.classList.add('flex');
+        btn.classList.remove('from-cyan-500', 'to-teal-500');
+        btn.classList.add('from-red-500', 'to-pink-500', 'shadow-red-500/20');
+      } else {
+        btnText.innerText = "Sequenz Abspielen";
+        badge.classList.add('hidden');
+        badge.classList.remove('flex');
+        btn.classList.remove('from-red-500', 'to-pink-500', 'shadow-red-500/20');
+        btn.classList.add('from-cyan-500', 'to-teal-500');
+      }
+    }
+
+    function renderSequenceTable() {
+      const tbody = document.getElementById('sequenceTableBody');
+      tbody.innerHTML = '';
+
+      let totalDuration = 0;
+
+      sequence.forEach((tone, index) => {
+        totalDuration += Number(tone.duration);
+
+        const tr = document.createElement('tr');
+        tr.id = `seq-row-${index}`;
+        tr.className = "hover:bg-gray-900/60 transition-colors group";
+
+        tr.innerHTML = `
+          <td class="py-2.5 px-3 text-center text-gray-500 font-bold">${index + 1}</td>
+          <td class="py-2.5 px-3">
+            <div class="flex items-center space-x-2">
+              <input type="number" min="20" max="20000" value="${tone.freq}" 
+                onchange="updateTone(${index}, 'freq', this.value)"
+                class="w-20 bg-gray-900 border border-gray-700 text-cyan-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-cyan-500">
+              <span class="text-[10px] text-gray-500 hidden sm:inline">Hz</span>
+            </div>
+          </td>
+          <td class="py-2.5 px-3">
+            <div class="flex items-center space-x-2">
+              <input type="number" min="10" max="10000" value="${tone.duration}" 
+                onchange="updateTone(${index}, 'duration', this.value)"
+                class="w-20 bg-gray-900 border border-gray-700 text-teal-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-cyan-500">
+              <span class="text-[10px] text-gray-500 hidden sm:inline">ms</span>
+            </div>
+          </td>
+          <td class="py-2.5 px-3">
+            <select onchange="updateTone(${index}, 'type', this.value)" 
+              class="bg-gray-900 border border-gray-700 text-gray-300 text-xs rounded px-2 py-1 focus:outline-none focus:border-cyan-500">
+              <option value="sine" ${tone.type === 'sine' ? 'selected' : ''}>Sinus</option>
+              <option value="square" ${tone.type === 'square' ? 'selected' : ''}>Rechteck</option>
+              <option value="sawtooth" ${tone.type === 'sawtooth' ? 'selected' : ''}>Sägezahn</option>
+              <option value="triangle" ${tone.type === 'triangle' ? 'selected' : ''}>Dreieck</option>
+            </select>
+          </td>
+          <td class="py-2.5 px-3 text-center">
+            <button onclick="playSingleTone(${index})" title="Ton testen" class="p-1.5 bg-gray-800 hover:bg-cyan-500/20 hover:text-cyan-400 text-gray-400 rounded-lg transition-all">
+              <i data-lucide="volume-2" class="w-3.5 h-3.5"></i>
+            </button>
+          </td>
+          <td class="py-2.5 px-3 text-right">
+            <div class="flex items-center justify-end space-x-1">
+              <button onclick="moveRow(${index}, -1)" ${index === 0 ? 'disabled class="opacity-30 p-1"' : 'class="p-1 text-gray-400 hover:text-gray-200"'} title="Nach oben">
+                <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="moveRow(${index}, 1)" ${index === sequence.length - 1 ? 'disabled class="opacity-30 p-1"' : 'class="p-1 text-gray-400 hover:text-gray-200"'} title="Nach unten">
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="duplicateRow(${index})" class="p-1 text-gray-400 hover:text-cyan-400" title="Duplizieren">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="deleteRow(${index})" class="p-1 text-gray-400 hover:text-red-400" title="Löschen">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Update footers
+      document.getElementById('totalTonesCount').innerText = sequence.length;
+      document.getElementById('totalDurationCount').innerText = totalDuration + ' ms';
+
+      lucide.createIcons();
+      updateCodeOutput();
+    }
+
+    function addToneRow() {
+      // Default to last tone or sensible default
+      const last = sequence[sequence.length - 1] || { freq: 1000, duration: 100, type: 'sine' };
+      sequence.push({ freq: last.freq + 200, duration: last.duration, type: last.type });
+      renderSequenceTable();
+    }
+
+    function updateTone(index, field, value) {
+      if (field === 'freq' || field === 'duration') {
+        sequence[index][field] = Math.max(1, parseInt(value) || 0);
+      } else {
+        sequence[index][field] = value;
+      }
+      renderSequenceTable();
+    }
+
+    function deleteRow(index) {
+      sequence.splice(index, 1);
+      renderSequenceTable();
+    }
+
+    function duplicateRow(index) {
+      const copy = { ...sequence[index] };
+      sequence.splice(index + 1, 0, copy);
+      renderSequenceTable();
+    }
+
+    function moveRow(index, direction) {
+      const newIndex = index + direction;
+      if (newIndex < 0 || newIndex >= sequence.length) return;
+      const temp = sequence[index];
+      sequence[index] = sequence[newIndex];
+      sequence[newIndex] = temp;
+      renderSequenceTable();
+    }
+
+    function clearSequence() {
+      if (confirm('Möchtest du wirklich alle Töne aus der Sequenz entfernen?')) {
+        sequence = [];
+        renderSequenceTable();
+      }
+    }
+
+    function loadPreset(key) {
+      if (PRESETS[key]) {
+        sequence = JSON.parse(JSON.stringify(PRESETS[key]));
+        renderSequenceTable();
+        showToast(`Preset "${key}" geladen.`, 'info');
+      }
+    }
+
+    function highlightRow(index) {
+      unhighlightAllRows();
+      const row = document.getElementById(`seq-row-${index}`);
+      if (row) {
+        row.classList.add('active-row');
+        row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    function unhighlightRow(index) {
+      const row = document.getElementById(`seq-row-${index}`);
+      if (row) row.classList.remove('active-row');
+    }
+
+    function unhighlightAllRows() {
+      const rows = document.querySelectorAll('#sequenceTableBody tr');
+      rows.forEach(r => r.classList.remove('active-row'));
+    }
+
+    function switchCodeTab(tab) {
+      activeTab = tab;
+      ['js', 'arduino', 'json'].forEach(t => {
+        const btn = document.getElementById(`tab${t.charAt(0).toUpperCase() + t.slice(1)}`);
+        if (t === tab) {
+          btn.className = "px-2.5 py-1 rounded-md font-medium text-cyan-400 bg-gray-800 shadow";
+        } else {
+          btn.className = "px-2.5 py-1 rounded-md font-medium text-gray-400 hover:text-gray-200";
+        }
+      });
+      updateCodeOutput();
+    }
+
+    function updateCodeOutput() {
+      const codeOutput = document.getElementById('codeOutput');
+      if (!codeOutput) return;
+
+      if (activeTab === 'js') {
+        let code = `// Web Audio API Sequenz-Wiedergabe\n`;
+        code += `function playSineSequence() {\n`;
+        code += `  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();\n`;
+        code += `  let currentTime = audioCtx.currentTime;\n\n`;
+        
+        sequence.forEach(t => {
+          code += `  playSine(${t.freq}, ${t.duration}); // ${t.type}\n`;
+        });
+
+        code += `\n  function playSine(freq, durationMs) {\n`;
+        code += `    const osc = audioCtx.createOscillator();\n`;
+        code += `    const gain = audioCtx.createGain();\n`;
+        code += `    osc.type = 'sine';\n`;
+        code += `    osc.frequency.setValueAtTime(freq, currentTime);\n`;
+        code += `    osc.connect(gain);\n`;
+        code += `    gain.connect(audioCtx.destination);\n`;
+        code += `    osc.start(currentTime);\n`;
+        code += `    osc.stop(currentTime + durationMs / 1000);\n`;
+        code += `    currentTime += durationMs / 1000;\n`;
+        code += `  }\n`;
+        code += `}\n\nplaySineSequence();`;
+
+        codeOutput.textContent = code;
+      } else if (activeTab === 'arduino') {
+        let code = `// Arduino / ESP32 Ton-Sequenz\n`;
+        code += `#define BUZZER_PIN 8\n\n`;
+        code += `void playSequence() {\n`;
+        sequence.forEach(t => {
+          code += `  tone(BUZZER_PIN, ${t.freq}, ${t.duration});\n`;
+          code += `  delay(${t.duration});\n`;
+        });
+        code += `}\n\nvoid setup() {\n  playSequence();\n}\n\nvoid loop() {}`;
+
+        codeOutput.textContent = code;
+      } else if (activeTab === 'json') {
+        codeOutput.textContent = JSON.stringify(sequence, null, 2);
+      }
+    }
+
+    function copyCodeToClipboard() {
+      const codeText = document.getElementById('codeOutput').textContent;
+      
+      // Fallback for clipboard copy in restricted frames
+      const tempTextArea = document.createElement('textarea');
+      tempTextArea.value = codeText;
+      document.body.appendChild(tempTextArea);
+      tempTextArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(tempTextArea);
+
+      const btnText = document.getElementById('copyBtnText');
+      btnText.innerText = 'Kopiert!';
+      setTimeout(() => {
+        btnText.innerText = 'Kopieren';
+      }, 2000);
+
+      showToast('Code in die Zwischenablage kopiert!', 'success');
+    }
+
+    function downloadJson() {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(sequence, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", "tone-sequence.json");
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+
+    function importJson(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const parsed = JSON.parse(e.target.result);
+          if (Array.isArray(parsed)) {
+            sequence = parsed.map(item => ({
+              freq: Number(item.freq) || 440,
+              duration: Number(item.duration) || 100,
+              type: item.type || 'sine'
+            }));
+            renderSequenceTable();
+            showToast('JSON-Sequenz erfolgreich geladen!', 'success');
+          } else {
+            showToast('Ungültiges JSON-Format!', 'error');
+          }
+        } catch (err) {
+          showToast('Fehler beim Lesen der JSON-Datei', 'error');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+
+      const colorClasses = type === 'error' 
+        ? 'bg-red-900/90 border-red-500 text-red-200' 
+        : type === 'success' 
+        ? 'bg-emerald-900/90 border-emerald-500 text-emerald-200' 
+        : 'bg-cyan-900/90 border-cyan-500 text-cyan-200';
+
+      toast.className = `pointer-events-auto border px-4 py-2.5 rounded-xl text-xs font-medium shadow-2xl flex items-center space-x-2 transition-all transform translate-y-2 opacity-0 ${colorClasses}`;
+      toast.innerHTML = `<span>${message}</span>`;
+
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+      }, 10);
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+  </script>
+</body>
+</html>
+)rawliteral";

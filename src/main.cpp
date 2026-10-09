@@ -2,8 +2,8 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Preferences.h>
-#include <driver/i2s.h>
 #include "Audio.h"
+#include <math.h>
 #include "config.h"
 #include "web_pages.h"
 #include "wifi_manager.h"
@@ -11,6 +11,9 @@
 #include "station_manager.h"
 #include "mqtt_manager.h"
 #include "sd_manager.h"
+#include "mic_manager.h"
+#include "wake_word_manager.h"
+#include "wake_word_detector.h"
 #include <vector>
 
 // Reserve fuer Webserver-Upload (M3U-Import) und Senderdatei-Zugriffe im loopTask
@@ -24,6 +27,10 @@ AlarmManager alarmMgr;
 StationManager stationMgr;
 MqttManager mqttMgr;
 SdManager sdMgr;
+MicManager mic;
+WakeWordManager wakeWordMgr;
+WakeWordDetector wakeDetector;
+String wakeWordError;
 
 // Statusvariablen
 String currentStation = "Bereit (Kein Sender gewählt)";
@@ -44,49 +51,6 @@ bool sdPlayAllActive = false;
 volatile bool pendingResume = false;
 volatile bool pendingSdNext = false;
 
-static TaskHandle_t micTaskHandle = nullptr;
-static portMUX_TYPE micMux = portMUX_INITIALIZER_UNLOCKED;
-static volatile bool micStopRequested = false;
-static bool micActive = false;
-static float micDbfs = -60.0f;
-static int micError = 0;
-
-void microphoneTask(void *parameter) {
-    int32_t samples[256];
-    float smoothedDbfs = -60.0f;
-
-    while (!micStopRequested) {
-        size_t bytesRead = 0;
-        esp_err_t result = i2s_read(I2S_NUM_1, samples, sizeof(samples), &bytesRead, pdMS_TO_TICKS(200));
-        if (result != ESP_OK || bytesRead < sizeof(int32_t)) continue;
-
-        const size_t sampleCount = bytesRead / sizeof(int32_t);
-        double sumSquares = 0.0;
-        for (size_t index = 0; index < sampleCount; ++index) {
-            const double normalized = static_cast<double>(samples[index]) / 2147483648.0;
-            sumSquares += normalized * normalized;
-        }
-
-        const double rms = sqrt(sumSquares / sampleCount);
-        float currentDbfs = rms > 0.0 ? static_cast<float>(20.0 * log10(rms)) : -60.0f;
-        currentDbfs = constrain(currentDbfs, -60.0f, 0.0f);
-        smoothedDbfs = smoothedDbfs * 0.7f + currentDbfs * 0.3f;
-
-        portENTER_CRITICAL(&micMux);
-        micDbfs = smoothedDbfs;
-        portEXIT_CRITICAL(&micMux);
-    }
-
-    i2s_stop(I2S_NUM_1);
-    i2s_driver_uninstall(I2S_NUM_1);
-    portENTER_CRITICAL(&micMux);
-    micActive = false;
-    micDbfs = -60.0f;
-    micTaskHandle = nullptr;
-    portEXIT_CRITICAL(&micMux);
-    vTaskDelete(nullptr);
-}
-
 // Snapshot & Durchsage (Announcement / TTS) Status
 struct PlaybackSnapshot {
     bool wasPlaying = false;
@@ -102,7 +66,11 @@ struct PlaybackSnapshot {
 };
 
 PlaybackSnapshot previousState;
+PlaybackSnapshot speechPreviousState;
 bool isAnnouncing = false;
+bool speechCaptureActive = false;
+bool wakeAckTonePlaying = false;
+volatile bool pendingWakeAckDone = false;
 unsigned long announceStartMs = 0;
 unsigned long announceLastActiveMs = 0;
 const unsigned long ANNOUNCE_IDLE_TIMEOUT_MS = 10000;
@@ -191,6 +159,232 @@ void playNextSdFile() {
         isPlaying = startSdPath(sdPlayAllPaths[sdPlayAllIndex], false);
     } else {
         clearSdPlayAll();
+        isPlaying = false;
+    }
+}
+
+void writeLe16(uint8_t *dst, uint16_t value) {
+    dst[0] = value & 0xff;
+    dst[1] = (value >> 8) & 0xff;
+}
+
+void writeLe32(uint8_t *dst, uint32_t value) {
+    dst[0] = value & 0xff;
+    dst[1] = (value >> 8) & 0xff;
+    dst[2] = (value >> 16) & 0xff;
+    dst[3] = (value >> 24) & 0xff;
+}
+
+void makeWavHeader(uint8_t header[44], uint32_t sampleCount) {
+    const uint32_t dataBytes = sampleCount * sizeof(int16_t);
+    memset(header, 0, 44);
+    memcpy(header, "RIFF", 4);
+    writeLe32(header + 4, 36 + dataBytes);
+    memcpy(header + 8, "WAVEfmt ", 8);
+    writeLe32(header + 16, 16);
+    writeLe16(header + 20, 1);
+    writeLe16(header + 22, 1);
+    writeLe32(header + 24, MicManager::SAMPLE_RATE);
+    writeLe32(header + 28, MicManager::SAMPLE_RATE * sizeof(int16_t));
+    writeLe16(header + 32, sizeof(int16_t));
+    writeLe16(header + 34, 16);
+    memcpy(header + 36, "data", 4);
+    writeLe32(header + 40, dataBytes);
+}
+
+bool saveVoiceRecording(const int16_t *samples, size_t sampleCount, String &savedPath) {
+    if (!sdMgr.isMounted() || !samples || sampleCount == 0 || sampleCount > MicManager::SAMPLE_RATE * 10) return false;
+    int32_t sourcePeak = 0;
+    for (size_t i = 0; i < sampleCount; ++i) {
+        const int32_t magnitude = abs(static_cast<int32_t>(samples[i]));
+        if (magnitude > sourcePeak) sourcePeak = magnitude;
+    }
+    const float gain = sourcePeak > 0 ? min(8.0f, 25000.0f / sourcePeak) : 1.0f;
+
+    fs::FS &filesystem = sdMgr.filesystem();
+    const char *directory = "/wakeword/recordings";
+    if (!filesystem.exists(directory) && !filesystem.mkdir(directory)) return false;
+
+    char pathBuffer[48];
+    bool foundPath = false;
+    for (unsigned sequence = 1; sequence <= 9999; ++sequence) {
+        snprintf(pathBuffer, sizeof(pathBuffer), "%s/voice_%04u.wav", directory, sequence);
+        if (!filesystem.exists(pathBuffer)) { foundPath = true; break; }
+    }
+    if (!foundPath) return false;
+
+    File file = filesystem.open(pathBuffer, "w");
+    if (!file) return false;
+    uint8_t header[44];
+    makeWavHeader(header, sampleCount);
+    bool success = file.write(header, sizeof(header)) == sizeof(header);
+    const uint8_t *pcm = reinterpret_cast<const uint8_t *>(samples);
+    uint8_t writeBuffer[4096];
+    size_t remaining = sampleCount * sizeof(int16_t);
+    size_t sampleOffset = 0;
+    while (success && remaining > 0) {
+        const size_t block = min(remaining, (size_t)4096);
+        memcpy(writeBuffer, pcm, block);
+        int16_t *normalized = reinterpret_cast<int16_t *>(writeBuffer);
+        for (size_t i = 0; i < block / sizeof(int16_t); ++i) {
+            const int32_t value = lroundf(samples[sampleOffset + i] * gain);
+            normalized[i] = static_cast<int16_t>(constrain(value, -32768L, 32767L));
+        }
+        const size_t written = file.write(writeBuffer, block);
+        if (written != block) success = false;
+        pcm += written;
+        remaining -= written;
+        sampleOffset += block / sizeof(int16_t);
+        delay(0);
+    }
+    file.close();
+    if (!success) {
+        filesystem.remove(pathBuffer);
+        return false;
+    }
+    savedPath = pathBuffer;
+    Serial.printf("[WAKE] WAV-Pegel: Peak %ld, Verstaerkung %.2fx\n", (long)sourcePeak, gain);
+    return true;
+}
+
+bool ensureWakeAckFile() {
+    fs::FS &filesystem = sdMgr.filesystem();
+    const char *path = "/wakeword/ack.wav";
+    constexpr uint32_t sampleCount = MicManager::SAMPLE_RATE * 600 / 1000;
+    if (filesystem.exists(path)) {
+        File existing = filesystem.open(path, "r");
+        const bool valid = existing && existing.size() == 44 + sampleCount * sizeof(int16_t);
+        if (existing) existing.close();
+        if (valid) return true;
+        filesystem.remove(path);
+    }
+
+    File file = filesystem.open(path, "w");
+    if (!file) return false;
+    uint8_t header[44];
+    makeWavHeader(header, sampleCount);
+    bool success = file.write(header, sizeof(header)) == sizeof(header);
+    int16_t samples[256];
+    uint32_t sampleIndex = 0;
+    while (success && sampleIndex < sampleCount) {
+        const size_t count = min((size_t)(sampleCount - sampleIndex), (size_t)256);
+        for (size_t i = 0; i < count; ++i, ++sampleIndex) {
+            const float progress = (float)sampleIndex / sampleCount;
+            const float envelope = fminf(progress * 20.0f, (1.0f - progress) * 20.0f);
+            const float frequency = progress < 0.35f ? 880.0f : 1174.0f;
+            samples[i] = (int16_t)(sinf(6.28318530718f * frequency * sampleIndex / MicManager::SAMPLE_RATE) *
+                                   4500.0f * fmaxf(0.0f, envelope));
+        }
+        const size_t bytes = count * sizeof(int16_t);
+        success = file.write(reinterpret_cast<const uint8_t *>(samples), bytes) == bytes;
+    }
+    file.close();
+    if (!success) filesystem.remove(path);
+    return success;
+}
+
+void snapshotPlayback(PlaybackSnapshot &snapshot) {
+    snapshot.wasPlaying = audio.isRunning() || isPlaying;
+    snapshot.station = currentStation;
+    snapshot.title = currentTitle;
+    snapshot.url = currentStreamUrl;
+    snapshot.volume = currentVolume;
+    snapshot.isSd = currentStation.startsWith("SD: ");
+    snapshot.sdPath = snapshot.isSd ? currentStreamUrl : "";
+    snapshot.sdPlayAll = sdPlayAllActive;
+    snapshot.sdPlayAllIdx = sdPlayAllIndex;
+    snapshot.sdPlayAllList = sdPlayAllPaths;
+}
+
+void restoreAfterSpeechCapture(bool recordingSaved) {
+    audio.stopSong();
+    currentVolume = speechPreviousState.volume;
+    audio.setVolume(currentVolume);
+    if (speechPreviousState.wasPlaying) {
+        bool restored = false;
+        if (speechPreviousState.isSd) {
+            if (speechPreviousState.sdPlayAll && !speechPreviousState.sdPlayAllList.empty()) {
+                sdPlayAllPaths = speechPreviousState.sdPlayAllList;
+                sdPlayAllIndex = speechPreviousState.sdPlayAllIdx;
+                sdPlayAllActive = true;
+                if (sdPlayAllIndex < sdPlayAllPaths.size()) restored = startSdPath(sdPlayAllPaths[sdPlayAllIndex], false);
+            } else if (!speechPreviousState.sdPath.isEmpty()) {
+                restored = startSdPath(speechPreviousState.sdPath, false);
+            }
+        } else if (!speechPreviousState.url.isEmpty()) {
+            startStream(speechPreviousState.station, speechPreviousState.url, false);
+            restored = true;
+        }
+        isPlaying = restored;
+        if (!restored) {
+            currentStation = "Gestoppt";
+            currentTitle = "--";
+            currentBitrate = "--";
+            currentStreamUrl = "";
+        }
+        Serial.printf("[WAKE] Vorherige Wiedergabe fortgesetzt: %s\n", currentStation.c_str());
+        return;
+    }
+
+    currentStation = "Gestoppt";
+    currentTitle = "--";
+    currentBitrate = "--";
+    currentStreamUrl = "";
+    isPlaying = false;
+    if (sdMgr.isMounted() && ensureWakeAckFile()) {
+        audio.setVolume(5);
+        currentStation = "Wake Word";
+        currentTitle = recordingSaved ? "Aufnahme gespeichert" : "Aufnahme nicht gespeichert";
+        currentStreamUrl = "/wakeword/ack.wav";
+        wakeAckTonePlaying = true;
+        isPlaying = audio.connecttoFS(sdMgr.filesystem(), currentStreamUrl.c_str());
+        if (!isPlaying) {
+            wakeAckTonePlaying = false;
+            audio.setVolume(currentVolume);
+        }
+    }
+}
+
+void serviceWakeWordCapture() {
+    if (wakeDetector.takeDetection() && !speechCaptureActive && !isAnnouncing) {
+        Serial.printf("[WAKE] Wake Word '%s' erkannt (%u)\n", wakeWordMgr.selected().c_str(),
+                      (unsigned)wakeDetector.detectionCount());
+        snapshotPlayback(speechPreviousState);
+        clearSdPlayAll();
+        pendingSdNext = false;
+        if (speechPreviousState.wasPlaying) audio.stopSong();
+        isPlaying = false;
+        currentStation = "Sprachaufnahme";
+        currentTitle = "Sprache wird aufgenommen...";
+        currentBitrate = "--";
+        currentStreamUrl = "";
+        speechCaptureActive = true;
+        wakeDetector.startRecording();
+        Serial.println("[WAKE] Aufnahme laeuft, Ende nach Stille oder max. 10 Sekunden.");
+    }
+
+    if (speechCaptureActive && wakeDetector.recordingComplete()) {
+        String savedPath;
+        const bool saved = saveVoiceRecording(wakeDetector.recordingData(), wakeDetector.recordingSampleCount(), savedPath);
+        if (saved) Serial.printf("[WAKE] Aufnahme gespeichert: %s\n", savedPath.c_str());
+        else Serial.println("[WAKE] Aufnahme konnte nicht auf der SD-Karte gespeichert werden.");
+
+        wakeDetector.releaseRecording();
+        speechCaptureActive = false;
+        restoreAfterSpeechCapture(saved);
+        mqttMgr.publishState(audio.isRunning(), currentStation, currentTitle, currentVolume,
+                             currentAnnounceVolume, isAnnouncing);
+    }
+
+    if (pendingWakeAckDone) {
+        pendingWakeAckDone = false;
+        wakeAckTonePlaying = false;
+        audio.setVolume(currentVolume);
+        if (sdMgr.isMounted()) sdMgr.filesystem().remove("/wakeword/ack.wav");
+        currentStation = "Gestoppt";
+        currentTitle = "--";
+        currentBitrate = "--";
+        currentStreamUrl = "";
         isPlaying = false;
     }
 }
@@ -399,6 +593,97 @@ void handleAlarmPage() {
     server.send(200, "text/html", ALARM_HTML);
 }
 
+void handleWakeWordPage() {
+    server.send(200, "text/html", WAKEWORD_HTML);
+}
+
+void handleWakeWordList() {
+    server.send(200, "application/json", wakeWordMgr.listJson());
+}
+
+void handleToneGeneratorPage() {
+    server.send(200, "text/html", TONGENERATOR_HTML);
+}
+
+void startWakeWord() {
+    wakeDetector.end();
+    wakeWordError = "";
+    if (wakeWordMgr.selected().isEmpty()) return;
+
+    esp_err_t micErr = mic.begin(I2S_MIC_BCLK, I2S_MIC_LRC, I2S_MIC_DOUT);
+    if (micErr != ESP_OK) {
+        wakeWordError = String("Mikrofon: ") + esp_err_to_name(micErr);
+        Serial.printf("[WAKE] %s\n", wakeWordError.c_str());
+        return;
+    }
+    uint8_t *model = nullptr;
+    WakeWordDetector::Settings settings;
+    if (!wakeWordMgr.loadSelected(model, settings, wakeWordError)) {
+        Serial.printf("[WAKE] %s\n", wakeWordError.c_str());
+        return;
+    }
+    if (!wakeDetector.begin(&mic, model, settings)) wakeWordError = wakeDetector.error();
+}
+
+void handleWakeWordStatus() {
+    String error = wakeWordError;
+    if (error.isEmpty()) error = wakeDetector.error();
+    String json = "{\"running\":" + String(wakeDetector.isRunning() ? "true" : "false") +
+                  ",\"peak\":" + String(wakeDetector.takePeakProbability(), 3) +
+                  ",\"detections\":" + String(wakeDetector.detectionCount()) +
+                  ",\"error\":\"" + StationManager::jsonEscape(error) + "\"}";
+    server.send(200, "application/json", json);
+}
+
+void handleWakeWordSettings() {
+    if (speechCaptureActive) {
+        server.send(409, "text/plain", "Sprachaufnahme laeuft");
+        return;
+    }
+    if (!server.hasArg("probability_cutoff") || !server.hasArg("sliding_window_size")) {
+        server.send(400, "text/plain", "Wake-Word-Einstellungen fehlen");
+        return;
+    }
+
+    const String cutoffArg = server.arg("probability_cutoff");
+    const String windowArg = server.arg("sliding_window_size");
+    const String silenceArg = server.arg("end_of_speech_silence_ms");
+    char *cutoffEnd = nullptr;
+    char *windowEnd = nullptr;
+    char *silenceEnd = nullptr;
+    const float cutoff = strtof(cutoffArg.c_str(), &cutoffEnd);
+    const long windowValue = strtol(windowArg.c_str(), &windowEnd, 10);
+    const long silenceValue = strtol(silenceArg.c_str(), &silenceEnd, 10);
+    if (cutoffEnd == cutoffArg.c_str() || *cutoffEnd != '\0' ||
+        windowEnd == windowArg.c_str() || *windowEnd != '\0' || windowValue < 1 || windowValue > 32 ||
+        silenceEnd == silenceArg.c_str() || *silenceEnd != '\0' || silenceValue < 0 || silenceValue > 3000 || silenceValue % 100 != 0) {
+        server.send(400, "text/plain", "Ungueltige Wake-Word-Einstellungen");
+        return;
+    }
+    const int window = static_cast<int>(windowValue);
+    String error;
+    if (!wakeWordMgr.saveSelectedSettings(cutoff, window, static_cast<uint16_t>(silenceValue), error)) {
+        server.send(400, "text/plain", error);
+        return;
+    }
+
+    startWakeWord();
+    server.send(200, "text/plain", "OK");
+}
+
+void handleWakeWordSelect() {
+    if (speechCaptureActive) {
+        server.send(409, "text/plain", "Sprachaufnahme laeuft");
+        return;
+    }
+    if (!wakeWordMgr.select(server.arg("name"))) {
+        server.send(404, "text/plain", "Modell nicht gefunden");
+        return;
+    }
+    startWakeWord();
+    server.send(200, "text/plain", "OK");
+}
+
 // Webserver Route: Wecker Status API
 void handleAlarmStatus() {
     String json = alarmMgr.getStatusJson();
@@ -503,90 +788,24 @@ void handleStatus() {
 }
 
 void handleMicStart() {
-    portENTER_CRITICAL(&micMux);
-    const bool taskExists = micTaskHandle != nullptr;
-    portEXIT_CRITICAL(&micMux);
-    if (taskExists) {
-        server.send(409, "text/plain", "Mikrofontest ist bereits aktiv oder wird beendet");
+    esp_err_t err = mic.begin(I2S_MIC_BCLK, I2S_MIC_LRC, I2S_MIC_DOUT);
+    if (err != ESP_OK) {
+        server.send(500, "text/plain", "I2S-Mikrofon konnte nicht gestartet werden: " + String(esp_err_to_name(err)));
         return;
     }
-
-    i2s_config_t micConfig = {};
-    micConfig.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX);
-    micConfig.sample_rate = 16000;
-    micConfig.bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT;
-    micConfig.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
-    micConfig.communication_format = I2S_COMM_FORMAT_STAND_I2S;
-    micConfig.intr_alloc_flags = 0;
-    micConfig.dma_buf_count = 4;
-    micConfig.dma_buf_len = 128;
-    micConfig.use_apll = false;
-    micConfig.tx_desc_auto_clear = false;
-    micConfig.fixed_mclk = 0;
-
-    esp_err_t result = i2s_driver_install(I2S_NUM_1, &micConfig, 0, nullptr);
-    if (result == ESP_OK) {
-        i2s_pin_config_t micPins = {};
-        micPins.mck_io_num = I2S_PIN_NO_CHANGE;
-        micPins.bck_io_num = I2S_MIC_BCLK;
-        micPins.ws_io_num = I2S_MIC_LRC;
-        micPins.data_out_num = I2S_PIN_NO_CHANGE;
-        micPins.data_in_num = I2S_MIC_DOUT;
-        result = i2s_set_pin(I2S_NUM_1, &micPins);
-    }
-    if (result != ESP_OK) {
-        i2s_driver_uninstall(I2S_NUM_1);
-        portENTER_CRITICAL(&micMux);
-        micError = result;
-        portEXIT_CRITICAL(&micMux);
-        server.send(500, "text/plain", "I2S-Mikrofon konnte nicht gestartet werden: " + String(static_cast<int>(result)));
-        return;
-    }
-
-    portENTER_CRITICAL(&micMux);
-    micStopRequested = false;
-    micError = 0;
-    micActive = true;
-    micDbfs = -60.0f;
-    portEXIT_CRITICAL(&micMux);
-
-    TaskHandle_t taskHandle = nullptr;
-    if (xTaskCreate(microphoneTask, "mic_rx", 4096, nullptr, 1, &taskHandle) != pdPASS) {
-        i2s_driver_uninstall(I2S_NUM_1);
-        portENTER_CRITICAL(&micMux);
-        micActive = false;
-        micError = ESP_ERR_NO_MEM;
-        portEXIT_CRITICAL(&micMux);
-        server.send(500, "text/plain", "Kein Speicher fuer den Mikrofontest");
-        return;
-    }
-    portENTER_CRITICAL(&micMux);
-    micTaskHandle = taskHandle;
-    portEXIT_CRITICAL(&micMux);
     server.send(200, "text/plain", "OK");
 }
 
 void handleMicStop() {
-    portENTER_CRITICAL(&micMux);
-    const bool wasActive = micTaskHandle != nullptr;
-    micStopRequested = true;
-    portEXIT_CRITICAL(&micMux);
-    server.send(200, "text/plain", wasActive ? "Stopping" : "OK");
+    // Mikrofon bleibt an, solange die Wake-Word-Erkennung es braucht
+    if (!wakeDetector.isRunning()) mic.end();
+    server.send(200, "text/plain", "OK");
 }
 
 void handleMicStatus() {
-    bool active;
-    float level;
-    int error;
-    portENTER_CRITICAL(&micMux);
-    active = micActive;
-    level = micDbfs;
-    error = micError;
-    portEXIT_CRITICAL(&micMux);
-
-    String json = "{\"active\":" + String(active ? "true" : "false") +
-                  ",\"dbfs\":" + String(level, 1) +
-                  ",\"error\":" + String(error) + "}";
+    String json = "{\"active\":" + String(mic.isRunning() ? "true" : "false") +
+                  ",\"dbfs\":" + String(mic.levelDbfs(), 1) +
+                  ",\"error\":" + String(static_cast<int>(mic.lastError())) + "}";
     server.send(200, "application/json", json);
 }
 
@@ -810,6 +1029,8 @@ void handleAnnounceVolume() {
 void stopPlayback() {
     Serial.println("[RADIO] Stop");
     clearSdPlayAll();
+    wakeAckTonePlaying = false;
+    pendingWakeAckDone = false;
     audio.stopSong();
     isPlaying = false;
     savePersistedRadioPower(false);
@@ -916,6 +1137,7 @@ void setup() {
     sdMgr.begin();
     wifiMgr.initWifi(sdMgr.isMounted() ? &sdMgr.filesystem() : nullptr);
     stationMgr.begin(sdMgr.isMounted() ? &sdMgr.filesystem() : nullptr);
+    wakeWordMgr.begin(sdMgr.isMounted() ? &sdMgr.filesystem() : nullptr);
     Serial.printf("[RADIO] %u Sender (%s), %u Favoriten\n", (unsigned)stationMgr.size(),
                   stationMgr.usesSd() ? "SD" : "NVS", (unsigned)stationMgr.favSize());
     mqttMgr.setStationListProvider(buildStationOptionsJson);
@@ -930,6 +1152,12 @@ void setup() {
     server.on("/setup", HTTP_GET, handleSetup);
     server.on("/alarm", HTTP_GET, handleAlarmPage);
     server.on("/sdcard", HTTP_GET, handleSdCard);   
+    server.on("/wakeword", HTTP_GET, handleWakeWordPage);
+    server.on("/tongenerator", HTTP_GET, handleToneGeneratorPage);
+    server.on("/api/wakeword/list", HTTP_GET, handleWakeWordList);
+    server.on("/api/wakeword/status", HTTP_GET, handleWakeWordStatus);
+    server.on("/api/wakeword/settings", HTTP_POST, handleWakeWordSettings);
+    server.on("/api/wakeword/select", HTTP_POST, handleWakeWordSelect);
     server.on("/api/status", HTTP_GET, handleStatus);
     server.on("/api/mic/start", HTTP_POST, handleMicStart);
     server.on("/api/mic/stop", HTTP_POST, handleMicStop);
@@ -977,6 +1205,8 @@ void setup() {
             Serial.printf("[RADIO] Autostart: %s\n", currentStation.c_str());
         }
     }
+
+    startWakeWord();
 }
 
 void loop() {
@@ -991,6 +1221,8 @@ void loop() {
     }
     server.handleClient();
     mqttMgr.loop();
+
+    serviceWakeWordCapture();
 
     // Timeout-Schutz für Durchsagen, falls der TTS-Stream abreißt
     if (isAnnouncing) {
@@ -1055,6 +1287,10 @@ void audio_bitrate(const char *info) {
 void audio_eof_mp3(const char *info) {
     Serial.print("[EOF MP3] ");
     Serial.println(info);
+    if (wakeAckTonePlaying) {
+        pendingWakeAckDone = true;
+        return;
+    }
     if (isAnnouncing) {
         pendingResume = true;
         return;
