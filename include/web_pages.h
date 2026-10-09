@@ -56,6 +56,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     .btn-primary:hover { background: var(--accent-hover); }
     .btn-danger { background: var(--danger); color: white; flex: 1; }
     .btn-danger:hover { opacity: 0.9; }
+    .btn-play { background: var(--active); color: #052e16; flex: 1; }
+    .btn-play:hover { background: #059669; }
     
     .volume-box { display: flex; flex-direction: column; gap: 0.4rem; }
     .volume-label { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted); }
@@ -130,7 +132,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         <input type="range" id="volSlider" min="0" max="21" value="12" oninput="setVolume(this.value)">
       </div>
       <div class="btn-row">
-        <button class="btn-danger" onclick="stopAudio()">⏹ Stop</button>
+        <button class="btn-danger" id="playbackToggle" onclick="togglePlayback()">⏹ Stop</button>
       </div>
     </div>
 
@@ -201,6 +203,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   <script>
     let favorites = [];
+    let radioIsPlaying = false;
     let stationPage = null;
     let stationOffset = 0;
     let stationQuery = '';
@@ -459,9 +462,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       }
     }
 
-    function stopAudio() {
-      fetch('/api/stop');
-      setTimeout(updateStatus, 200);
+    function togglePlayback() {
+      const button = document.getElementById('playbackToggle');
+      const endpoint = radioIsPlaying ? '/api/stop' : '/api/resume';
+      button.disabled = true;
+      fetch(endpoint)
+        .then(res => res.ok ? res.text() : res.text().then(text => Promise.reject(text)))
+        .then(updateStatus)
+        .catch(error => console.error(error))
+        .finally(() => { button.disabled = false; });
     }
 
     let volTimeout;
@@ -486,6 +495,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       fetch('/api/status')
         .then(res => res.json())
         .then(data => {
+          radioIsPlaying = data.playing;
+          const playbackButton = document.getElementById('playbackToggle');
+          playbackButton.className = radioIsPlaying ? 'btn-danger' : 'btn-play';
+          playbackButton.innerText = radioIsPlaying ? '⏹ Stop' : '▶ Play';
           document.getElementById('stationName').innerText = data.station || 'Unbekannt';
           document.getElementById('trackTitle').innerText = data.title || '--';
           document.getElementById('bitrate').innerText = (data.bitrate && data.bitrate !== "0") ? (Math.round(data.bitrate/1000) + " kbps") : (data.bitrate_raw || "--");
@@ -892,7 +905,7 @@ const char ALARM_HTML[] PROGMEM = R"rawliteral(
       <div id="statusMsg" class="status-msg"></div>
       <div id="stationMsg" class="status-msg error" style="display: none;">Bitte zuerst eine M3U-Senderliste auf der Hauptseite hochladen.</div>
 
-      <a href="/" class="nav-link">← Zurück zum Radio</a>
+      <a href="/" class="nav-link"><h1>📻</h1></a>
     </div>
 
     <div class="card">
@@ -1080,7 +1093,7 @@ const char SDCARD_LEGACY_HTML[] PROGMEM = R"rawliteral(
 
       <div id="statusMsg" class="status-msg"></div>
 
-      <a href="/" class="nav-link">← Zurück zum Radio</a>
+      <a href="/" class="nav-link"><h1>📻</h1></a>
     </div>
 
     <div class="card">
