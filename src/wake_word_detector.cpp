@@ -22,6 +22,8 @@ constexpr size_t MAX_SLIDING_WINDOW = 32;
 constexpr size_t MAX_RECORDING_SECONDS = 10;
 constexpr size_t MAX_RECORDING_SAMPLES = MicManager::SAMPLE_RATE * MAX_RECORDING_SECONDS;
 constexpr float SPEECH_GATE_DBFS = -45.0f;
+// Reaktionszeit nach dem Wake Word, bevor die Stille-Zeit ohne Sprache zaehlt
+constexpr uint32_t NO_SPEECH_GRACE_MS = 1000;
 // Nach Start/Erkennung ~0,74 s ignorieren, bis der Modellzustand eingeschwungen ist (wie ESPHome)
 constexpr int MIN_SLICES_BEFORE_DETECTION = 74;
 constexpr size_t TASK_STACK = 10240;
@@ -232,6 +234,7 @@ void WakeWordDetector::run() {
         }
         if (d.recordingActive && millis() - d.recordingStartedMs >= MAX_RECORDING_SECONDS * 1000) {
             d.recordingActive = false;
+            recordingHasSpeech_ = d.speechSeen;
             recordingComplete_ = true;
             mic_->setStreamingEnabled(false);
             Serial.println("[WAKE] Sprachaufnahme beendet: Maximaldauer erreicht.");
@@ -278,14 +281,17 @@ void WakeWordDetector::run() {
 
             const bool silenceEnded = d.speechSeen && d.silenceStartedMs != 0 &&
                 now - d.silenceStartedMs >= settings_.endOfSpeechSilenceMs;
+            const bool noSpeech = !d.speechSeen &&
+                now - d.recordingStartedMs >= NO_SPEECH_GRACE_MS + settings_.endOfSpeechSilenceMs;
             const bool maxDurationReached = d.recordingSamples >= MAX_RECORDING_SAMPLES;
-            if (silenceEnded || maxDurationReached) {
+            if (silenceEnded || noSpeech || maxDurationReached) {
                 d.recordingActive = false;
+                recordingHasSpeech_ = d.speechSeen;
                 recordingComplete_ = true;
                 mic_->setStreamingEnabled(false);
                 Serial.printf("[WAKE] Sprachaufnahme beendet: %u ms, %s\n",
                               (unsigned)((d.recordingSamples * 1000) / MicManager::SAMPLE_RATE),
-                              silenceEnded ? "Stille erkannt" : "Maximaldauer erreicht");
+                              silenceEnded ? "Stille erkannt" : (noSpeech ? "keine Sprache erkannt" : "Maximaldauer erreicht"));
                 continue;
             }
         }

@@ -26,6 +26,7 @@ public:
     bool takeDetection();
     void startRecording();
     bool recordingComplete() const { return recordingComplete_; }
+    bool recordingHasSpeech() const { return recordingHasSpeech_; }
     const int16_t *recordingData() const;
     size_t recordingSampleCount() const;
     void releaseRecording();
@@ -50,6 +51,7 @@ private:
     volatile bool detected_ = false;
     volatile bool recordingRequested_ = false;
     volatile bool recordingComplete_ = false;
+    volatile bool recordingHasSpeech_ = false;
     volatile bool recordingReleaseRequested_ = false;
     volatile uint32_t detections_ = 0;
     portMUX_TYPE mux_ = portMUX_INITIALIZER_UNLOCKED;

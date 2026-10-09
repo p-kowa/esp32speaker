@@ -14,6 +14,7 @@
 #include "mic_manager.h"
 #include "wake_word_manager.h"
 #include "wake_word_detector.h"
+#include "tone_wav.h"
 #include <vector>
 
 // Reserve fuer Webserver-Upload (M3U-Import) und Senderdatei-Zugriffe im loopTask
@@ -50,6 +51,14 @@ bool sdPlayAllActive = false;
 // Von Audio-Callbacks gesetzt, in loop() ausgefuehrt (kein Neustart innerhalb audio.loop())
 volatile bool pendingResume = false;
 volatile bool pendingSdNext = false;
+// Fallback, wenn WAKE_ACK_JSON auf der SD fehlt oder ungueltig ist
+const String beepTone = R"json([
+  {"freq": 800, "duration": 80, "type": "sine"},
+  {"freq": 1100, "duration": 100, "type": "sine"},
+  {"freq": 1600, "duration": 180, "type": "sine"}
+])json";
+const char *WAKE_ACK_JSON = "/wakeword/beep.json";
+const char *WAKE_ACK_WAV = "/wakeword/ack.wav";
 
 // Snapshot & Durchsage (Announcement / TTS) Status
 struct PlaybackSnapshot {
@@ -163,35 +172,6 @@ void playNextSdFile() {
     }
 }
 
-void writeLe16(uint8_t *dst, uint16_t value) {
-    dst[0] = value & 0xff;
-    dst[1] = (value >> 8) & 0xff;
-}
-
-void writeLe32(uint8_t *dst, uint32_t value) {
-    dst[0] = value & 0xff;
-    dst[1] = (value >> 8) & 0xff;
-    dst[2] = (value >> 16) & 0xff;
-    dst[3] = (value >> 24) & 0xff;
-}
-
-void makeWavHeader(uint8_t header[44], uint32_t sampleCount) {
-    const uint32_t dataBytes = sampleCount * sizeof(int16_t);
-    memset(header, 0, 44);
-    memcpy(header, "RIFF", 4);
-    writeLe32(header + 4, 36 + dataBytes);
-    memcpy(header + 8, "WAVEfmt ", 8);
-    writeLe32(header + 16, 16);
-    writeLe16(header + 20, 1);
-    writeLe16(header + 22, 1);
-    writeLe32(header + 24, MicManager::SAMPLE_RATE);
-    writeLe32(header + 28, MicManager::SAMPLE_RATE * sizeof(int16_t));
-    writeLe16(header + 32, sizeof(int16_t));
-    writeLe16(header + 34, 16);
-    memcpy(header + 36, "data", 4);
-    writeLe32(header + 40, dataBytes);
-}
-
 bool saveVoiceRecording(const int16_t *samples, size_t sampleCount, String &savedPath) {
     if (!sdMgr.isMounted() || !samples || sampleCount == 0 || sampleCount > MicManager::SAMPLE_RATE * 10) return false;
     int32_t sourcePeak = 0;
@@ -216,7 +196,7 @@ bool saveVoiceRecording(const int16_t *samples, size_t sampleCount, String &save
     File file = filesystem.open(pathBuffer, "w");
     if (!file) return false;
     uint8_t header[44];
-    makeWavHeader(header, sampleCount);
+    makeWavHeader(header, sampleCount, MicManager::SAMPLE_RATE);
     bool success = file.write(header, sizeof(header)) == sizeof(header);
     const uint8_t *pcm = reinterpret_cast<const uint8_t *>(samples);
     uint8_t writeBuffer[4096];
@@ -249,38 +229,23 @@ bool saveVoiceRecording(const int16_t *samples, size_t sampleCount, String &save
 
 bool ensureWakeAckFile() {
     fs::FS &filesystem = sdMgr.filesystem();
-    const char *path = "/wakeword/ack.wav";
-    constexpr uint32_t sampleCount = MicManager::SAMPLE_RATE * 600 / 1000;
-    if (filesystem.exists(path)) {
-        File existing = filesystem.open(path, "r");
-        const bool valid = existing && existing.size() == 44 + sampleCount * sizeof(int16_t);
-        if (existing) existing.close();
-        if (valid) return true;
-        filesystem.remove(path);
+    JsonDocument doc;
+    String error;
+    File json = filesystem.open(WAKE_ACK_JSON, "r");
+    if (json) {
+        const DeserializationError parseError = deserializeJson(doc, json);
+        json.close();
+        if (!parseError && writeToneWav(filesystem, WAKE_ACK_WAV, doc.as<JsonArrayConst>(), error)) return true;
+        Serial.printf("[WAKE] %s ungueltig (%s), nutze Standardton\n", WAKE_ACK_JSON,
+                      parseError ? parseError.c_str() : error.c_str());
     }
 
-    File file = filesystem.open(path, "w");
-    if (!file) return false;
-    uint8_t header[44];
-    makeWavHeader(header, sampleCount);
-    bool success = file.write(header, sizeof(header)) == sizeof(header);
-    int16_t samples[256];
-    uint32_t sampleIndex = 0;
-    while (success && sampleIndex < sampleCount) {
-        const size_t count = min((size_t)(sampleCount - sampleIndex), (size_t)256);
-        for (size_t i = 0; i < count; ++i, ++sampleIndex) {
-            const float progress = (float)sampleIndex / sampleCount;
-            const float envelope = fminf(progress * 20.0f, (1.0f - progress) * 20.0f);
-            const float frequency = progress < 0.35f ? 880.0f : 1174.0f;
-            samples[i] = (int16_t)(sinf(6.28318530718f * frequency * sampleIndex / MicManager::SAMPLE_RATE) *
-                                   4500.0f * fmaxf(0.0f, envelope));
-        }
-        const size_t bytes = count * sizeof(int16_t);
-        success = file.write(reinterpret_cast<const uint8_t *>(samples), bytes) == bytes;
+    doc.clear();
+    if (deserializeJson(doc, beepTone) || !writeToneWav(filesystem, WAKE_ACK_WAV, doc.as<JsonArrayConst>(), error)) {
+        Serial.printf("[WAKE] Bestaetigungston konnte nicht erzeugt werden: %s\n", error.c_str());
+        return false;
     }
-    file.close();
-    if (!success) filesystem.remove(path);
-    return success;
+    return true;
 }
 
 void snapshotPlayback(PlaybackSnapshot &snapshot) {
@@ -335,7 +300,7 @@ void restoreAfterSpeechCapture(bool recordingSaved) {
         audio.setVolume(5);
         currentStation = "Wake Word";
         currentTitle = recordingSaved ? "Aufnahme gespeichert" : "Aufnahme nicht gespeichert";
-        currentStreamUrl = "/wakeword/ack.wav";
+        currentStreamUrl = WAKE_ACK_WAV;
         wakeAckTonePlaying = true;
         isPlaying = audio.connecttoFS(sdMgr.filesystem(), currentStreamUrl.c_str());
         if (!isPlaying) {
@@ -365,9 +330,14 @@ void serviceWakeWordCapture() {
 
     if (speechCaptureActive && wakeDetector.recordingComplete()) {
         String savedPath;
-        const bool saved = saveVoiceRecording(wakeDetector.recordingData(), wakeDetector.recordingSampleCount(), savedPath);
-        if (saved) Serial.printf("[WAKE] Aufnahme gespeichert: %s\n", savedPath.c_str());
-        else Serial.println("[WAKE] Aufnahme konnte nicht auf der SD-Karte gespeichert werden.");
+        bool saved = false;
+        if (!wakeDetector.recordingHasSpeech()) {
+            Serial.println("[WAKE] Keine Sprache erkannt, Aufnahme verworfen.");
+        } else {
+            saved = saveVoiceRecording(wakeDetector.recordingData(), wakeDetector.recordingSampleCount(), savedPath);
+            if (saved) Serial.printf("[WAKE] Aufnahme gespeichert: %s\n", savedPath.c_str());
+            else Serial.println("[WAKE] Aufnahme konnte nicht auf der SD-Karte gespeichert werden.");
+        }
 
         wakeDetector.releaseRecording();
         speechCaptureActive = false;
@@ -380,7 +350,7 @@ void serviceWakeWordCapture() {
         pendingWakeAckDone = false;
         wakeAckTonePlaying = false;
         audio.setVolume(currentVolume);
-        if (sdMgr.isMounted()) sdMgr.filesystem().remove("/wakeword/ack.wav");
+        if (sdMgr.isMounted()) sdMgr.filesystem().remove(WAKE_ACK_WAV);
         currentStation = "Gestoppt";
         currentTitle = "--";
         currentBitrate = "--";
