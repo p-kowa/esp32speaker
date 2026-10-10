@@ -1,8 +1,13 @@
 #pragma once
 #include <Arduino.h>
+#include <ArduinoJson.h>
+#include <FS.h>
+#include <HTTPClient.h>
+#include <math.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Preferences.h>
+#include "tone_wav.h"
 
 class MqttManager {
 public:
@@ -22,6 +27,60 @@ private:
     String password;
     uint16_t port = 1883;
     String base = "esp32radio";
+    String wavTransport = "mqtt";
+    String sendWavTopic = "esp32radio/audio/upload";
+    String sendWavUrl;
+    class PcmWavStream : public Stream {
+        const int16_t *samples = nullptr;
+        size_t sampleCount = 0;
+        size_t bytePosition = 0;
+        float gain = 1.0f;
+        uint8_t header[44] = {};
+        size_t totalBytes = 0;
+
+        uint8_t byteAt(size_t position) const {
+            if (position < sizeof(header)) return header[position];
+            const size_t pcmPosition = position - sizeof(header);
+            const size_t sampleIndex = pcmPosition / sizeof(int16_t);
+            const int32_t scaled = lroundf(samples[sampleIndex] * gain);
+            const uint16_t sample = static_cast<uint16_t>(static_cast<int16_t>(constrain(scaled, -32768L, 32767L)));
+            return static_cast<uint8_t>((sample >> ((pcmPosition % sizeof(int16_t)) * 8)) & 0xff);
+        }
+
+    public:
+        void reset(const int16_t *pcm, size_t count, uint32_t sampleRate) {
+            samples = pcm;
+            sampleCount = count;
+            bytePosition = 0;
+            int32_t peak = 0;
+            for (size_t i = 0; i < sampleCount; ++i) {
+                peak = max(peak, abs(static_cast<int32_t>(samples[i])));
+            }
+            gain = peak > 0 ? min(8.0f, 25000.0f / peak) : 1.0f;
+            makeWavHeader(header, sampleCount, sampleRate);
+            totalBytes = sizeof(header) + sampleCount * sizeof(int16_t);
+            Serial.printf("[AUDIO] WAV-RAM-Stream: Peak %ld, Verstaerkung %.2fx, %u Bytes\n",
+                          (long)peak, gain, (unsigned)totalBytes);
+        }
+
+        size_t size() const { return totalBytes; }
+        size_t write(uint8_t) override { return 0; }
+        int available() override { return static_cast<int>(totalBytes - bytePosition); }
+        int read() override {
+            if (bytePosition >= totalBytes) return -1;
+            return byteAt(bytePosition++);
+        }
+        int peek() override {
+            return bytePosition < totalBytes ? byteAt(bytePosition) : -1;
+        }
+        size_t readBytes(char *buffer, size_t length) override {
+            const size_t count = min(length, totalBytes - bytePosition);
+            for (size_t i = 0; i < count; ++i) buffer[i] = static_cast<char>(byteAt(bytePosition++));
+            return count;
+        }
+    } wavStream;
+    size_t wavPublishRemaining = 0;
+    bool wavPublishActive = false;
     unsigned long lastAttempt = 0;
     bool attempted = false;
     bool discoverySent = false;
@@ -89,6 +148,62 @@ private:
         discoverySent = true;
     }
 
+    void abortWavPublish(const char *reason) {
+        wavPublishRemaining = 0;
+        wavPublishActive = false;
+        netClient.stop();
+        Serial.printf("[MQTT] WAV-Uebertragung abgebrochen: %s\n", reason);
+    }
+
+    void serviceWavPublish() {
+        if (!wavPublishActive) return;
+
+        uint8_t buffer[1024];
+        const size_t blockSize = min(wavPublishRemaining, sizeof(buffer));
+        const size_t bytesRead = wavStream.readBytes(reinterpret_cast<char *>(buffer), blockSize);
+        if (bytesRead != blockSize) {
+            abortWavPublish("Lesefehler aus dem Aufnahme-Puffer");
+            return;
+        }
+        if (client.write(buffer, bytesRead) != bytesRead) {
+            abortWavPublish("MQTT-Write fehlgeschlagen");
+            return;
+        }
+
+        wavPublishRemaining -= bytesRead;
+        if (wavPublishRemaining == 0) {
+            const bool success = client.endPublish();
+            wavPublishActive = false;
+            Serial.printf("[MQTT] WAV-Uebertragung %s (%s)\n",
+                          success ? "abgeschlossen" : "fehlgeschlagen", sendWavTopic.c_str());
+        }
+    }
+
+    bool postWav() {
+        if (!sendWavUrl.startsWith("http://")) {
+            Serial.println("[HTTP] WAV-Upload abgebrochen: Es wird eine http://-URL benoetigt.");
+            return false;
+        }
+        if (!wavStream.size()) return false;
+
+        WiFiClient networkClient;
+        HTTPClient http;
+        if (!http.begin(networkClient, sendWavUrl)) {
+            Serial.println("[HTTP] WAV-Upload: ungueltige URL.");
+            return false;
+        }
+
+        http.setConnectTimeout(5000);
+        http.setTimeout(15000);
+        http.addHeader("Content-Type", "audio/wav");
+        const int status = http.sendRequest("POST", &wavStream, wavStream.size());
+        http.end();
+        const bool success = status >= 200 && status < 300;
+        Serial.printf("[HTTP] WAV-Upload %s, Status %d (%s)\n",
+                      success ? "erfolgreich" : "fehlgeschlagen", status, sendWavUrl.c_str());
+        return success;
+    }
+
 public:
     MqttManager() : client(netClient) {}
 
@@ -108,6 +223,9 @@ public:
         user = prefs.getString("user", "");
         password = prefs.getString("pass", "");
         base = prefs.getString("base", "esp32radio-" + getMacId()); // eindeutig je Gerät, verhindert Topic-Kollisionen bei mehreren Radios
+        wavTransport = prefs.getString("wavTransport", "mqtt");
+        sendWavTopic = prefs.getString("sendWav", "esp32radio/audio/upload");
+        sendWavUrl = prefs.getString("sendWavUrl", "");
         prefs.end();
         if (!host.isEmpty()) client.setServer(host.c_str(), port);
         client.setCallback([this](char *topicName, byte *payload, unsigned int length) {
@@ -120,20 +238,28 @@ public:
         client.setBufferSize(8192);
     }
 
-    void saveConfig(const String &newHost, uint16_t newPort, const String &newUser, const String &newPassword, const String &newBase) {
+    void saveConfig(const String &newHost, uint16_t newPort, const String &newUser, const String &newPassword,
+                    const String &newBase, const String &newSendWavTopic,
+                    const String &newWavTransport, const String &newSendWavUrl) {
         host = newHost;
         port = newPort;
         user = newUser;
         password = newPassword;
         base = newBase.isEmpty() ? "esp32radio" : newBase;
+        wavTransport = newWavTransport == "post" ? "post" : "mqtt";
+        sendWavTopic = newSendWavTopic.isEmpty() ? "esp32radio/audio/upload" : newSendWavTopic;
+        sendWavUrl = newSendWavUrl;
         prefs.begin("mqtt_config", false);
         prefs.putString("host", host);
         prefs.putUShort("port", port);
         prefs.putString("user", user);
         prefs.putString("pass", password);
         prefs.putString("base", base);
+        prefs.putString("wavTransport", wavTransport);
+        prefs.putString("sendWav", sendWavTopic);
+        prefs.putString("sendWavUrl", sendWavUrl);
         prefs.end();
-        client.setServer(host.c_str(), port);
+        if (!host.isEmpty()) client.setServer(host.c_str(), port);
         client.disconnect();
         discoverySent = false;
     }
@@ -145,10 +271,41 @@ public:
         return String("{\"status\":\"") + status + "\",\"host\":\"" + host + "\",\"port\":" + port + "}";
     }
     String getConfigJson() const {
-        return String("{\"host\":\"") + host + "\",\"port\":" + port + ",\"user\":\"" + user + "\",\"base\":\"" + base + "\"}";
+        JsonDocument config;
+        config["host"] = host;
+        config["port"] = port;
+        config["user"] = user;
+        config["base"] = base;
+        config["wavTransport"] = wavTransport;
+        config["sendWav"] = sendWavTopic;
+        config["sendWavUrl"] = sendWavUrl;
+        String json;
+        serializeJson(config, json);
+        return json;
     }
 
+    bool sendWav(const int16_t *samples, size_t sampleCount, uint32_t sampleRate) {
+        if (!samples || sampleCount == 0 || sampleCount > sampleRate * 10 || wavPublishActive) return false;
+        wavStream.reset(samples, sampleCount, sampleRate);
+        if (wavTransport == "post") return postWav();
+        if (!client.connected() || sendWavTopic.isEmpty()) return false;
+        if (sendWavTopic.indexOf('+') >= 0 || sendWavTopic.indexOf('#') >= 0) return false;
+
+        const size_t fileSize = wavStream.size();
+        if (!client.beginPublish(sendWavTopic.c_str(), (unsigned int)fileSize, false)) return false;
+
+        wavPublishRemaining = fileSize;
+        wavPublishActive = true;
+        Serial.printf("[MQTT] WAV-Uebertragung gestartet: %s (%u Bytes)\n", sendWavTopic.c_str(), (unsigned)fileSize);
+        return true;
+    }
+
+    bool wavSending() const { return wavPublishActive; }
+
     void loop() {
+        if (wavPublishActive && (!configured() || WiFi.status() != WL_CONNECTED || !client.connected())) {
+            abortWavPublish("Verbindung verloren");
+        }
         if (!configured() || WiFi.status() != WL_CONNECTED) return;
         if (!client.connected()) {
             if (attempted && millis() - lastAttempt < 5000) return;
@@ -167,6 +324,11 @@ public:
             Serial.println("[MQTT] Home-Assistant-Discovery publiziert.");
         }
         client.loop();
+        if (!client.connected() && wavPublishActive) {
+            abortWavPublish("MQTT-Verbindung verloren");
+            return;
+        }
+        serviceWavPublish();
     }
 
     void publishState(bool playing, const String &station, const String &title, int volume, int announceVolume = -1, bool announcing = false) {

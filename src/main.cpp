@@ -78,6 +78,7 @@ PlaybackSnapshot previousState;
 PlaybackSnapshot speechPreviousState;
 bool isAnnouncing = false;
 bool speechCaptureActive = false;
+bool speechUploadPending = false;
 bool wakeAckTonePlaying = false;
 volatile bool pendingWakeAckDone = false;
 unsigned long announceStartMs = 0;
@@ -172,61 +173,6 @@ void playNextSdFile() {
     }
 }
 
-bool saveVoiceRecording(const int16_t *samples, size_t sampleCount, String &savedPath) {
-    if (!sdMgr.isMounted() || !samples || sampleCount == 0 || sampleCount > MicManager::SAMPLE_RATE * 10) return false;
-    int32_t sourcePeak = 0;
-    for (size_t i = 0; i < sampleCount; ++i) {
-        const int32_t magnitude = abs(static_cast<int32_t>(samples[i]));
-        if (magnitude > sourcePeak) sourcePeak = magnitude;
-    }
-    const float gain = sourcePeak > 0 ? min(8.0f, 25000.0f / sourcePeak) : 1.0f;
-
-    fs::FS &filesystem = sdMgr.filesystem();
-    const char *directory = "/wakeword/recordings";
-    if (!filesystem.exists(directory) && !filesystem.mkdir(directory)) return false;
-
-    char pathBuffer[48];
-    bool foundPath = false;
-    for (unsigned sequence = 1; sequence <= 9999; ++sequence) {
-        snprintf(pathBuffer, sizeof(pathBuffer), "%s/voice_%04u.wav", directory, sequence);
-        if (!filesystem.exists(pathBuffer)) { foundPath = true; break; }
-    }
-    if (!foundPath) return false;
-
-    File file = filesystem.open(pathBuffer, "w");
-    if (!file) return false;
-    uint8_t header[44];
-    makeWavHeader(header, sampleCount, MicManager::SAMPLE_RATE);
-    bool success = file.write(header, sizeof(header)) == sizeof(header);
-    const uint8_t *pcm = reinterpret_cast<const uint8_t *>(samples);
-    uint8_t writeBuffer[4096];
-    size_t remaining = sampleCount * sizeof(int16_t);
-    size_t sampleOffset = 0;
-    while (success && remaining > 0) {
-        const size_t block = min(remaining, (size_t)4096);
-        memcpy(writeBuffer, pcm, block);
-        int16_t *normalized = reinterpret_cast<int16_t *>(writeBuffer);
-        for (size_t i = 0; i < block / sizeof(int16_t); ++i) {
-            const int32_t value = lroundf(samples[sampleOffset + i] * gain);
-            normalized[i] = static_cast<int16_t>(constrain(value, -32768L, 32767L));
-        }
-        const size_t written = file.write(writeBuffer, block);
-        if (written != block) success = false;
-        pcm += written;
-        remaining -= written;
-        sampleOffset += block / sizeof(int16_t);
-        delay(0);
-    }
-    file.close();
-    if (!success) {
-        filesystem.remove(pathBuffer);
-        return false;
-    }
-    savedPath = pathBuffer;
-    Serial.printf("[WAKE] WAV-Pegel: Peak %ld, Verstaerkung %.2fx\n", (long)sourcePeak, gain);
-    return true;
-}
-
 bool ensureWakeAckFile() {
     fs::FS &filesystem = sdMgr.filesystem();
     JsonDocument doc;
@@ -261,7 +207,7 @@ void snapshotPlayback(PlaybackSnapshot &snapshot) {
     snapshot.sdPlayAllList = sdPlayAllPaths;
 }
 
-void restoreAfterSpeechCapture(bool recordingSaved) {
+void restoreAfterSpeechCapture(bool recordingHadSpeech) {
     audio.stopSong();
     currentVolume = speechPreviousState.volume;
     audio.setVolume(currentVolume);
@@ -299,7 +245,7 @@ void restoreAfterSpeechCapture(bool recordingSaved) {
     if (sdMgr.isMounted() && ensureWakeAckFile()) {
         audio.setVolume(5);
         currentStation = "Wake Word";
-        currentTitle = recordingSaved ? "Aufnahme gespeichert" : "Aufnahme nicht gespeichert";
+        currentTitle = recordingHadSpeech ? "Sprachaufnahme abgeschlossen" : "Keine Sprache erkannt";
         currentStreamUrl = WAKE_ACK_WAV;
         wakeAckTonePlaying = true;
         isPlaying = audio.connecttoFS(sdMgr.filesystem(), currentStreamUrl.c_str());
@@ -311,6 +257,16 @@ void restoreAfterSpeechCapture(bool recordingSaved) {
 }
 
 void serviceWakeWordCapture() {
+    if (speechUploadPending) {
+        if (mqttMgr.wavSending()) return;
+        speechUploadPending = false;
+        wakeDetector.releaseRecording();
+        speechCaptureActive = false;
+        restoreAfterSpeechCapture(true);
+        mqttMgr.publishState(audio.isRunning(), currentStation, currentTitle, currentVolume,
+                             currentAnnounceVolume, isAnnouncing);
+    }
+
     if (wakeDetector.takeDetection() && !speechCaptureActive && !isAnnouncing) {
         Serial.printf("[WAKE] Wake Word '%s' erkannt (%u)\n", wakeWordMgr.selected().c_str(),
                       (unsigned)wakeDetector.detectionCount());
@@ -329,19 +285,23 @@ void serviceWakeWordCapture() {
     }
 
     if (speechCaptureActive && wakeDetector.recordingComplete()) {
-        String savedPath;
-        bool saved = false;
-        if (!wakeDetector.recordingHasSpeech()) {
+        const bool hasSpeech = wakeDetector.recordingHasSpeech();
+        if (!hasSpeech) {
             Serial.println("[WAKE] Keine Sprache erkannt, Aufnahme verworfen.");
         } else {
-            saved = saveVoiceRecording(wakeDetector.recordingData(), wakeDetector.recordingSampleCount(), savedPath);
-            if (saved) Serial.printf("[WAKE] Aufnahme gespeichert: %s\n", savedPath.c_str());
-            else Serial.println("[WAKE] Aufnahme konnte nicht auf der SD-Karte gespeichert werden.");
+            const bool started = mqttMgr.sendWav(wakeDetector.recordingData(),
+                                                 wakeDetector.recordingSampleCount(),
+                                                 MicManager::SAMPLE_RATE);
+            if (!started) Serial.println("[AUDIO] Sprachaufnahme konnte nicht versendet werden.");
+            if (started && mqttMgr.wavSending()) {
+                speechUploadPending = true;
+                return;
+            }
         }
 
         wakeDetector.releaseRecording();
         speechCaptureActive = false;
-        restoreAfterSpeechCapture(saved);
+        restoreAfterSpeechCapture(hasSpeech);
         mqttMgr.publishState(audio.isRunning(), currentStation, currentTitle, currentVolume,
                              currentAnnounceVolume, isAnnouncing);
     }
@@ -1060,14 +1020,24 @@ void handleWifiReset() {
 }
 
 void handleMqttConfig() {
-    if (!server.hasArg("host")) {
+    const String transport = server.hasArg("wavTransport") ? server.arg("wavTransport") : "mqtt";
+    const String host = server.hasArg("host") ? server.arg("host") : "";
+    const String sendWavUrl = server.hasArg("sendWavUrl") ? server.arg("sendWavUrl") : "";
+    if (transport != "post" && host.isEmpty()) {
         server.send(400, "text/plain", "MQTT host missing");
         return;
     }
-    mqttMgr.saveConfig(server.arg("host"), server.hasArg("port") ? server.arg("port").toInt() : 1883,
+    if (transport == "post" && !sendWavUrl.startsWith("http://")) {
+        server.send(400, "text/plain", "HTTP WAV URL must start with http://");
+        return;
+    }
+    mqttMgr.saveConfig(host, server.hasArg("port") ? server.arg("port").toInt() : 1883,
                        server.hasArg("user") ? server.arg("user") : "",
                        server.hasArg("pass") ? server.arg("pass") : "",
-                       server.hasArg("base") ? server.arg("base") : "esp32radio");
+                       server.hasArg("base") ? server.arg("base") : "esp32radio",
+                       server.hasArg("sendWav") ? server.arg("sendWav") : "esp32radio/audio/upload",
+                       transport,
+                       sendWavUrl);
     server.send(200, "text/plain", "OK");
 }
 

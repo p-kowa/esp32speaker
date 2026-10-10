@@ -572,7 +572,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
     
     .form-group { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1rem; }
     label { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
-    select, input[type=text], input[type=password] { background: #0f172a; border: 1px solid var(--border); border-radius: 0.5rem; color: var(--text); padding: 0.75rem; font-size: 0.95rem; outline: none; width: 100%; }
+    select, input[type=text], input[type=password], input[type=url] { background: #0f172a; border: 1px solid var(--border); border-radius: 0.5rem; color: var(--text); padding: 0.75rem; font-size: 0.95rem; outline: none; width: 100%; }
     select:focus, input:focus { border-color: var(--accent); }
     
     .row { display: flex; gap: 0.5rem; }
@@ -635,32 +635,58 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="card">
-      <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.75rem;">MQTT / Home Assistant</h3>
-      <div class="form-group">
-        <label for="mqttHost">Broker-Adresse</label>
-        <input type="text" id="mqttHost" placeholder="192.168.10.3">
-      </div>
-      <div class="form-group">
-        <label for="mqttPort">Port</label>
-        <input type="text" id="mqttPort" value="1883" inputmode="numeric">
-      </div>
-      <div class="form-group">
-        <label for="mqttUser">Benutzername (optional)</label>
-        <input type="text" id="mqttUser" placeholder="leer lassen möglich">
-      </div>
-      <div class="form-group">
-        <label for="mqttPass">Passwort (optional)</label>
-        <input type="password" id="mqttPass" placeholder="leer lassen möglich">
-      </div>
-      <div class="form-group">
-        <label for="mqttBase">MQTT Topic-Basis</label>
-        <input type="text" id="mqttBase" value="esp32radio">
-      </div>
-      <button class="btn-primary" onclick="saveMqtt()">💾 MQTT speichern</button>
-      <div id="mqttMsg" class="status-msg"></div>
-      <div id="mqttStatus" class="status-msg info" style="display: block;">MQTT-Status wird geladen...</div>
+  <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.75rem;">MQTT / Home Assistant</h3>
+
+  <div class="form-group">
+    <label>Übertragungsmethode für WAV</label>
+    <div style="display: flex; gap: 1.5rem; margin-top: 0.3rem; margin-bottom: 0.75rem;">
+      <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-weight: normal;">
+        <input type="radio" name="wavTransport" value="mqtt" checked onclick="toggleSendMode('mqtt')"> MQTT
+      </label>
+      <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-weight: normal;">
+        <input type="radio" name="wavTransport" value="post" onclick="toggleSendMode('post')"> HTTP POST
+      </label>
     </div>
   </div>
+
+  <div class="form-group">
+    <label for="mqttHost">Broker-Adresse</label>
+    <input type="text" id="mqttHost" placeholder="192.168.10.3">
+  </div>
+  <div class="form-group">
+    <label for="mqttPort">Port</label>
+    <input type="text" id="mqttPort" value="1883" inputmode="numeric">
+  </div>
+  <div class="form-group">
+    <label for="mqttUser">Benutzername (optional)</label>
+    <input type="text" id="mqttUser" placeholder="leer lassen möglich">
+  </div>
+  <div class="form-group">
+    <label for="mqttPass">Passwort (optional)</label>
+    <input type="password" id="mqttPass" placeholder="leer lassen möglich">
+  </div>
+  <div class="form-group">
+    <label for="mqttBase">MQTT Topic-Basis</label>
+    <input type="text" id="mqttBase" value="esp32radio">
+  </div>
+
+  <!-- MQTT Topic Gruppe -->
+  <div class="form-group" id="groupMqttWav">
+    <label for="mqttSendWav">MQTT Topic für WAV-Nachrichten</label>
+    <input type="text" id="mqttSendWav" value="esp32radio/audio/upload">
+  </div>
+
+  <!-- HTTP POST URL Gruppe (standardmäßig ausgeblendet, da MQTT preselected ist) -->
+  <div class="form-group" id="groupPostUrl" style="display: none;">
+    <label for="sendWavUrl">HTTP-URL für WAV-Nachrichten</label>
+    <input type="url" id="sendWavUrl" value="" placeholder="http://192.168.1.50:1880/esp32radio/audio/upload">
+    <small style="color: var(--text-muted);">Nur http:// wird unterstützt. Verwende die IP-Adresse des Whisper-Servers, nicht localhost.</small>
+  </div>
+
+  <button class="btn-primary" onclick="saveMqtt()">💾 Übertragung speichern</button>
+  <div id="mqttMsg" class="status-msg"></div>
+  <div id="mqttStatus" class="status-msg info" style="display: block;">MQTT-Status wird geladen...</div>
+</div>
 
   <script>
     function showMsg(text, type) {
@@ -669,6 +695,18 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       msg.innerHTML = text;
       msg.style.display = 'block';
     }
+
+    function toggleSendMode(mode) {
+  const groupMqtt = document.getElementById('groupMqttWav');
+  const groupPost = document.getElementById('groupPostUrl');
+  if (mode === 'mqtt') {
+    groupMqtt.style.display = 'block';
+    groupPost.style.display = 'none';
+  } else {
+    groupMqtt.style.display = 'none';
+    groupPost.style.display = 'block';
+  }
+}
 
     function scanWifi() {
       const sel = document.getElementById('ssidSelect');
@@ -746,6 +784,11 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
           document.getElementById('mqttPort').value = data.port || 1883;
           document.getElementById('mqttUser').value = data.user || '';
           document.getElementById('mqttBase').value = data.base || 'esp32radio';
+          document.getElementById('mqttSendWav').value = data.sendWav || 'esp32radio/audio/upload';
+          document.getElementById('sendWavUrl').value = data.sendWavUrl || '';
+          const transport = data.wavTransport === 'post' ? 'post' : 'mqtt';
+          document.querySelector('input[name="wavTransport"][value="' + transport + '"]').checked = true;
+          toggleSendMode(transport);
         });
     }
 
@@ -772,21 +815,40 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
     }
 
     function saveMqtt() {
+      const transport = document.querySelector('input[name="wavTransport"]:checked').value;
+      const sendWavUrl = document.getElementById('sendWavUrl').value.trim();
+      if (transport === 'post' && !sendWavUrl.startsWith('http://')) {
+        const msg = document.getElementById('mqttMsg');
+        msg.className = 'status-msg error';
+        msg.innerText = 'Bitte eine HTTP-URL beginnend mit http:// eingeben.';
+        msg.style.display = 'block';
+        return;
+      }
+
       const formData = new FormData();
       formData.append('host', document.getElementById('mqttHost').value.trim());
       formData.append('port', document.getElementById('mqttPort').value || '1883');
       formData.append('user', document.getElementById('mqttUser').value.trim());
       formData.append('pass', document.getElementById('mqttPass').value);
       formData.append('base', document.getElementById('mqttBase').value.trim() || 'esp32radio');
+      formData.append('sendWav', document.getElementById('mqttSendWav').value.trim() || 'esp32radio/audio/upload');
+      formData.append('wavTransport', transport);
+      formData.append('sendWavUrl', sendWavUrl);
 
       fetch('/api/mqtt/config', { method: 'POST', body: formData })
-        .then(res => res.text())
+        .then(res => res.ok ? res.text() : res.text().then(text => Promise.reject(text)))
         .then(() => {
           const msg = document.getElementById('mqttMsg');
           msg.className = 'status-msg success';
-          msg.innerText = 'MQTT gespeichert. Verbindung wird aufgebaut.';
+          msg.innerText = 'WAV-Übertragungseinstellungen gespeichert.';
           msg.style.display = 'block';
           loadMqttStatus();
+        })
+        .catch(error => {
+          const msg = document.getElementById('mqttMsg');
+          msg.className = 'status-msg error';
+          msg.innerText = 'Speichern fehlgeschlagen: ' + error;
+          msg.style.display = 'block';
         });
     }
 
