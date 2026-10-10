@@ -571,10 +571,6 @@ void handleWakeWordList() {
     server.send(200, "application/json", wakeWordMgr.listJson());
 }
 
-void handleToneGeneratorPage() {
-    server.send(200, "text/html", TONGENERATOR_HTML);
-}
-
 void startWakeWord() {
     wakeDetector.end();
     wakeWordError = "";
@@ -1132,7 +1128,6 @@ void setup() {
     server.on("/alarm", HTTP_GET, handleAlarmPage);
     server.on("/sdcard", HTTP_GET, handleSdCard);   
     server.on("/wakeword", HTTP_GET, handleWakeWordPage);
-    server.on("/tongenerator", HTTP_GET, handleToneGeneratorPage);
     server.on("/api/wakeword/list", HTTP_GET, handleWakeWordList);
     server.on("/api/wakeword/status", HTTP_GET, handleWakeWordStatus);
     server.on("/api/wakeword/settings", HTTP_POST, handleWakeWordSettings);
