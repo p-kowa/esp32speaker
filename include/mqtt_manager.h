@@ -81,6 +81,7 @@ private:
     } wavStream;
     size_t wavPublishRemaining = 0;
     bool wavPublishActive = false;
+    bool wavPublishOk = false;
     unsigned long lastAttempt = 0;
     bool attempted = false;
     bool discoverySent = false;
@@ -151,6 +152,7 @@ private:
     void abortWavPublish(const char *reason) {
         wavPublishRemaining = 0;
         wavPublishActive = false;
+        wavPublishOk = false;
         netClient.stop();
         Serial.printf("[MQTT] WAV-Uebertragung abgebrochen: %s\n", reason);
     }
@@ -165,17 +167,16 @@ private:
             abortWavPublish("Lesefehler aus dem Aufnahme-Puffer");
             return;
         }
-        if (client.write(buffer, bytesRead) != bytesRead) {
+        if (netClient.write(buffer, bytesRead) != bytesRead) {
             abortWavPublish("MQTT-Write fehlgeschlagen");
             return;
         }
 
         wavPublishRemaining -= bytesRead;
         if (wavPublishRemaining == 0) {
-            const bool success = client.endPublish();
             wavPublishActive = false;
-            Serial.printf("[MQTT] WAV-Uebertragung %s (%s)\n",
-                          success ? "abgeschlossen" : "fehlgeschlagen", sendWavTopic.c_str());
+            wavPublishOk = true;
+            Serial.printf("[MQTT] WAV-Uebertragung abgeschlossen (%s)\n", sendWavTopic.c_str());
         }
     }
 
@@ -292,12 +293,36 @@ public:
         if (sendWavTopic.indexOf('+') >= 0 || sendWavTopic.indexOf('#') >= 0) return false;
 
         const size_t fileSize = wavStream.size();
-        if (!client.beginPublish(sendWavTopic.c_str(), (unsigned int)fileSize, false)) return false;
+        const size_t topicLength = sendWavTopic.length();
+        // PubSubClient::beginPublish kuerzt die Paketlaenge auf 16 Bit, daher PUBLISH-Header selbst bauen
+        uint8_t header[1 + 4 + 2];
+        size_t headerLength = 0;
+        size_t remainingLength = 2 + topicLength + fileSize;
+        header[headerLength++] = 0x30;
+        do {
+            uint8_t digit = remainingLength & 0x7F;
+            remainingLength >>= 7;
+            if (remainingLength) digit |= 0x80;
+            header[headerLength++] = digit;
+        } while (remainingLength);
+        header[headerLength++] = topicLength >> 8;
+        header[headerLength++] = topicLength & 0xFF;
+        if (netClient.write(header, headerLength) != headerLength ||
+            netClient.write(reinterpret_cast<const uint8_t *>(sendWavTopic.c_str()), topicLength) != topicLength) {
+            abortWavPublish("MQTT-Header konnte nicht gesendet werden");
+            return false;
+        }
 
         wavPublishRemaining = fileSize;
         wavPublishActive = true;
+        wavPublishOk = false;
         Serial.printf("[MQTT] WAV-Uebertragung gestartet: %s (%u Bytes)\n", sendWavTopic.c_str(), (unsigned)fileSize);
-        return true;
+        // Am Stueck senden: andere Publishes zwischen den Bloecken wuerden das MQTT-Paket zerstoeren
+        while (wavPublishActive) {
+            serviceWavPublish();
+            yield();
+        }
+        return wavPublishOk;
     }
 
     bool wavSending() const { return wavPublishActive; }
