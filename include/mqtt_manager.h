@@ -8,6 +8,7 @@
 #include <PubSubClient.h>
 #include <Preferences.h>
 #include "tone_wav.h"
+#include "log_time.h"
 
 class MqttManager {
 public:
@@ -154,7 +155,7 @@ private:
         wavPublishActive = false;
         wavPublishOk = false;
         netClient.stop();
-        Serial.printf("[MQTT] WAV-Uebertragung abgebrochen: %s\n", reason);
+        Serial.printf("[%s] [MQTT] WAV-Uebertragung abgebrochen: %s\n", logTimestamp().c_str(), reason);
     }
 
     void serviceWavPublish() {
@@ -176,7 +177,7 @@ private:
         if (wavPublishRemaining == 0) {
             wavPublishActive = false;
             wavPublishOk = true;
-            Serial.printf("[MQTT] WAV-Uebertragung abgeschlossen (%s)\n", sendWavTopic.c_str());
+            Serial.printf("[%s] [MQTT] WAV-Uebertragung abgeschlossen (%s)\n", logTimestamp().c_str(), sendWavTopic.c_str());
         }
     }
 
@@ -316,7 +317,7 @@ public:
         wavPublishRemaining = fileSize;
         wavPublishActive = true;
         wavPublishOk = false;
-        Serial.printf("[MQTT] WAV-Uebertragung gestartet: %s (%u Bytes)\n", sendWavTopic.c_str(), (unsigned)fileSize);
+        Serial.printf("[%s] [MQTT] WAV-Uebertragung gestartet: %s (%u Bytes)\n", logTimestamp().c_str(), sendWavTopic.c_str(), (unsigned)fileSize);
         // Am Stueck senden: andere Publishes zwischen den Bloecken wuerden das MQTT-Paket zerstoeren
         while (wavPublishActive) {
             serviceWavPublish();

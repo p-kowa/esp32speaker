@@ -12,6 +12,7 @@
 #include <new>
 #include "wake_word_detector.h"
 #include "mic_manager.h"
+#include "log_time.h"
 
 namespace {
 constexpr size_t FEATURE_SIZE = 40;
@@ -237,7 +238,7 @@ void WakeWordDetector::run() {
             recordingHasSpeech_ = d.speechSeen;
             recordingComplete_ = true;
             mic_->setStreamingEnabled(false);
-            Serial.println("[WAKE] Sprachaufnahme beendet: Maximaldauer erreicht.");
+            Serial.printf("[%s] [WAKE] Sprachaufnahme beendet: Maximaldauer erreicht.\n", logTimestamp().c_str());
             continue;
         }
 
@@ -257,7 +258,7 @@ void WakeWordDetector::run() {
             d.recordingStartedMs = millis();
             d.silenceStartedMs = 0;
             d.speechSeen = false;
-            Serial.println("[WAKE] Sprachaufnahme gestartet (max. 10 s).");
+            Serial.printf("[%s] [WAKE] Sprachaufnahme gestartet (max. 10 s).\n", logTimestamp().c_str());
         }
         if (d.recordingActive) {
             const size_t copyCount = min(stepSamples, MAX_RECORDING_SAMPLES - d.recordingSamples);
@@ -289,7 +290,7 @@ void WakeWordDetector::run() {
                 recordingHasSpeech_ = d.speechSeen;
                 recordingComplete_ = true;
                 mic_->setStreamingEnabled(false);
-                Serial.printf("[WAKE] Sprachaufnahme beendet: %u ms, %s\n",
+                Serial.printf("[%s] [WAKE] Sprachaufnahme beendet: %u ms, %s\n", logTimestamp().c_str(),
                               (unsigned)((d.recordingSamples * 1000) / MicManager::SAMPLE_RATE),
                               silenceEnded ? "Stille erkannt" : (noSpeech ? "keine Sprache erkannt" : "Maximaldauer erreicht"));
                 continue;

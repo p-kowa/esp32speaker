@@ -268,7 +268,7 @@ void serviceWakeWordCapture() {
     }
 
     if (wakeDetector.takeDetection() && !speechCaptureActive && !isAnnouncing) {
-        Serial.printf("[WAKE] Wake Word '%s' erkannt (%u)\n", wakeWordMgr.selected().c_str(),
+        Serial.printf("[%s] [WAKE] Wake Word '%s' erkannt (%u)\n", logTimestamp().c_str(), wakeWordMgr.selected().c_str(),
                       (unsigned)wakeDetector.detectionCount());
         snapshotPlayback(speechPreviousState);
         clearSdPlayAll();
