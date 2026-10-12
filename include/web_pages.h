@@ -39,6 +39,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     .mic-meter { height: 14px; overflow: hidden; border-radius: 7px; background: #0f172a; border: 1px solid var(--border); }
     .mic-meter-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #10b981 0%, #facc15 70%, #ef4444 100%); transition: width 0.12s linear; }
     .mic-status { display: flex; justify-content: space-between; gap: 0.75rem; margin: 0.5rem 0; color: var(--text-muted); font-size: 0.85rem; }
+    .train-mode { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; font-size: 0.85rem; color: var(--text-muted); }
+    .train-mode label { display: inline-flex; align-items: center; gap: 0.3rem; }
+    .train-notice { background: rgba(250, 204, 21, 0.12); border: 1px solid #facc15; color: #fde68a; border-radius: 0.5rem; padding: 0.5rem 0.7rem; font-size: 0.8rem; margin-bottom: 0.75rem; }
+    .train-notice a { color: inherit; }
+    .train-item { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+    .train-head { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
+    .train-head span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .train-head a, .train-head button { background: #0f172a; color: var(--text); border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.35rem 0.55rem; font-size: 0.85rem; text-decoration: none; }
+    .train-item audio { width: 100%; height: 32px; margin-top: 0.4rem; }
     .subtitle { text-align: center; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem; }
     .now-playing { display: flex; flex-direction: column; gap: 0.5rem; }
     .status-badge { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; padding: 0.2rem 0.6rem; border-radius: 9999px; width: fit-content; background: #334155; }
@@ -162,17 +171,27 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       </div>
     </div>
 
-    <div class="card advanced-card" id="advancedCard">
-      <h3 style="font-size: 0.9rem; margin-bottom: 0.6rem; color: var(--text-muted);">Mikrofontest (ICS43434)</h3>
-      <button type="button" class="btn-primary" id="micToggle">Mikrofon-Test starten</button>
+    <div class="card">
+      <h3 style="font-size: 0.9rem; margin-bottom: 0.6rem; color: var(--text-muted);">Aufnahme (Wake-Word-Training)</h3>
+      <div id="wakeOffNotice" class="train-notice" hidden>Wake-Word-Erkennung ist ausgeschaltet. Zum Aktivieren unter <a href="/wakeword">Wake Word</a> ein Modell wählen.</div>
+      <div class="train-mode">
+        <label><input type="radio" name="trainMode" value="fixed" checked> Feste Dauer (2 s)</label>
+        <label><input type="radio" name="trainMode" value="manual"> Manuell (max. 10 s)</label>
+      </div>
+      <label class="options-toggle" style="margin-bottom: 0.75rem;"><input type="checkbox" id="trainPause" checked> Wiedergabe während Aufnahme pausieren</label>
+      <button type="button" class="btn-primary" id="micToggle" style="width: 100%;">⏺ Aufnahme starten</button>
       <div class="mic-status"><span id="micState">Inaktiv</span><strong id="micDbfs">-60.0 dBFS</strong></div>
       <div class="mic-meter" role="meter" aria-label="Mikrofonpegel" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="mic-meter-fill" id="micMeterFill"></div></div>
       <div class="volume-box" style="margin-top: 0.75rem;">
         <div class="volume-label"><label for="micSensitivity">Anzeige-Empfindlichkeit</label><span id="micSensitivityValue">1.0×</span></div>
         <input type="range" id="micSensitivity" min="1" max="8" step="0.5" value="1">
       </div>
+      <div id="trainMsg" class="hint" style="margin-top: 0.5rem;"></div>
       <div id="micError" style="font-size: 0.8rem; color: var(--danger); margin-top: 0.4rem;"></div>
+      <div id="trainingList" style="margin-top: 0.75rem;"></div>
+    </div>
 
+    <div class="card advanced-card" id="advancedCard">
       <div class="volume-box">
         <div class="volume-label">
           <span>📢 Durchsage-Lautstärke (TTS)</span>
@@ -363,53 +382,134 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     const micToggle = document.getElementById('micToggle');
     const micSensitivity = document.getElementById('micSensitivity');
-    let micPollTimer = null;
+    let trainTimer = null;
+    let lastTrain = null;
+    let trainStarting = false;
     micSensitivity.value = localStorage.getItem('micSensitivity') || '1';
     document.getElementById('micSensitivityValue').innerText = Number(micSensitivity.value).toFixed(1) + '×';
     micSensitivity.addEventListener('input', () => {
       localStorage.setItem('micSensitivity', micSensitivity.value);
       document.getElementById('micSensitivityValue').innerText = Number(micSensitivity.value).toFixed(1) + '×';
-      pollMicStatus();
+      if (lastTrain) renderTraining(lastTrain);
     });
 
-    function pollMicStatus() {
-      fetch('/api/mic/status')
+    const savedTrainMode = localStorage.getItem('trainMode') || 'fixed';
+    const trainPause = document.getElementById('trainPause');
+    trainPause.checked = localStorage.getItem('trainPause') !== 'false';
+    trainPause.addEventListener('change', () => localStorage.setItem('trainPause', trainPause.checked));
+    document.querySelectorAll('input[name="trainMode"]').forEach(radio => {
+      radio.checked = radio.value === savedTrainMode;
+      radio.addEventListener('change', () => localStorage.setItem('trainMode', radio.value));
+    });
+
+    function renderTraining(data) {
+      lastTrain = data;
+      const active = data.state !== 'idle';
+      const manual = data.mode === 'manual';
+      const state = document.getElementById('micState');
+      const fill = document.getElementById('micMeterFill');
+      const meter = fill.parentElement;
+      micToggle.disabled = trainStarting || !data.sd || data.state === 'saving' || (active && !manual);
+      micToggle.innerText = active && manual ? '⏹ Aufnahme stoppen' : '⏺ Aufnahme starten';
+      micToggle.className = active && manual ? 'btn-danger' : 'btn-primary';
+      document.querySelectorAll('input[name="trainMode"]').forEach(radio => { radio.disabled = active; });
+      trainPause.disabled = active || trainStarting;
+      document.getElementById('wakeOffNotice').hidden = data.wakeword_enabled;
+      if (data.state === 'recording') {
+        state.innerText = 'Aufnahme läuft: ' + (data.elapsed_ms / 1000).toFixed(1) + ' s' + (manual ? ' (max. ' : ' von ') + (data.target_ms / 1000).toFixed(0) + ' s' + (manual ? ')' : '');
+      } else if (data.state === 'saving') {
+        state.innerText = 'Speichere...';
+      } else {
+        state.innerText = data.sd ? 'Bereit' : 'Keine SD-Karte';
+      }
+      const dbfs = data.state === 'recording' ? Number(data.dbfs) : -60;
+      document.getElementById('micDbfs').innerText = dbfs.toFixed(1) + ' dBFS';
+      const baseLevel = Math.max(0, Math.min(100, (dbfs + 60) * (100 / 60)));
+      const displayLevel = Math.min(100, baseLevel * Number(micSensitivity.value));
+      fill.style.width = displayLevel + '%';
+      meter.setAttribute('aria-valuenow', String(Math.round(displayLevel)));
+    }
+
+    function pollTraining() {
+      clearTimeout(trainTimer);
+      fetch('/api/training/status')
         .then(res => res.json())
         .then(data => {
-          const state = document.getElementById('micState');
-          const dbfs = document.getElementById('micDbfs');
-          const fill = document.getElementById('micMeterFill');
-          const meter = fill.parentElement;
-          const error = document.getElementById('micError');
-          micToggle.innerText = data.active ? 'Mikrofon-Test stoppen' : 'Mikrofon-Test starten';
-          state.innerText = data.active ? 'Empfange I2S-Audio' : 'Inaktiv';
-          dbfs.innerText = Number(data.dbfs).toFixed(1) + ' dBFS';
-          const baseLevel = Math.max(0, Math.min(100, (Number(data.dbfs) + 60) * (100 / 60)));
-          const displayLevel = Math.min(100, baseLevel * Number(micSensitivity.value));
-          fill.style.width = displayLevel + '%';
-          meter.setAttribute('aria-valuenow', String(Math.round(displayLevel)));
-          error.innerText = data.error ? 'I2S-Fehler: ' + data.error : '';
-          if (!data.active && micPollTimer) {
-            clearInterval(micPollTimer);
-            micPollTimer = null;
+          const finished = lastTrain && lastTrain.state !== 'idle' && data.state === 'idle';
+          renderTraining(data);
+          if (finished) {
+            document.getElementById('trainMsg').innerText = data.error ? '' : 'Gespeichert: ' + data.last_file;
+            document.getElementById('micError').innerText = data.error || '';
+            loadTrainingList();
           }
+          trainTimer = setTimeout(pollTraining, data.state === 'idle' ? 3000 : 250);
         })
-        .catch(() => { document.getElementById('micState').innerText = 'Status nicht erreichbar'; });
+        .catch(() => {
+          document.getElementById('micState').innerText = 'Status nicht erreichbar';
+          trainTimer = setTimeout(pollTraining, 3000);
+        });
     }
 
     micToggle.addEventListener('click', () => {
-      const stopping = micToggle.innerText.includes('stoppen');
+      const stopping = lastTrain && lastTrain.state === 'recording' && lastTrain.mode === 'manual';
+      const mode = document.querySelector('input[name="trainMode"]:checked').value;
+      trainStarting = true;
       micToggle.disabled = true;
-      fetch(stopping ? '/api/mic/stop' : '/api/mic/start', { method: 'POST' })
-        .then(res => res.ok ? res.text() : res.text().then(text => Promise.reject(text)))
-        .then(() => {
-          if (!stopping && !micPollTimer) micPollTimer = setInterval(pollMicStatus, 250);
-          pollMicStatus();
-        })
+      document.getElementById('micError').innerText = '';
+      document.getElementById('trainMsg').innerText = '';
+      (stopping ? postForm('/api/training/stop', {}) : postForm('/api/training/start', { mode, pause: trainPause.checked ? '1' : '0' }))
         .catch(error => { document.getElementById('micError').innerText = error; })
-        .finally(() => { micToggle.disabled = false; });
+        .finally(() => { trainStarting = false; pollTraining(); });
     });
-    pollMicStatus();
+
+    function loadTrainingList() {
+      return fetch('/api/training/list')
+        .then(res => res.json())
+        .then(data => {
+          const box = document.getElementById('trainingList');
+          box.innerHTML = '';
+          if (!data.files.length) {
+            const hint = document.createElement('div');
+            hint.className = 'hint';
+            hint.innerText = data.sd ? 'Noch keine Aufnahmen.' : 'Keine SD-Karte eingelegt.';
+            box.appendChild(hint);
+            return;
+          }
+          data.files.forEach(f => {
+            const url = '/api/training/file?name=' + encodeURIComponent(f.name);
+            const item = document.createElement('div');
+            item.className = 'train-item';
+            const head = document.createElement('div');
+            head.className = 'train-head';
+            const label = document.createElement('span');
+            label.textContent = f.name + ' · ' + (Math.max(0, f.size - 44) / 32000).toFixed(1) + ' s';
+            const download = document.createElement('a');
+            download.href = url + '&download=1';
+            download.download = f.name;
+            download.textContent = '⬇';
+            download.title = 'Herunterladen';
+            const del = document.createElement('button');
+            del.textContent = '🗑';
+            del.title = 'Löschen';
+            del.onclick = () => {
+              if (!confirm('Aufnahme "' + f.name + '" löschen?')) return;
+              postForm('/api/training/delete', { name: f.name })
+                .then(loadTrainingList)
+                .catch(error => { document.getElementById('micError').innerText = 'Löschen fehlgeschlagen: ' + error; });
+            };
+            head.append(label, download, del);
+            const player = document.createElement('audio');
+            player.controls = true;
+            player.preload = 'none';
+            player.src = url;
+            item.append(head, player);
+            box.appendChild(item);
+          });
+        })
+        .catch(() => { document.getElementById('trainingList').innerText = 'Aufnahmen konnten nicht geladen werden.'; });
+    }
+    pollTraining();
+    loadTrainingList();
 
     document.getElementById('m3uForm').addEventListener('submit', event => {
       event.preventDefault();
@@ -1291,6 +1391,21 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
     .file-icon { flex:0 0 auto; font-size:1.4rem; }
     .path { flex:1; min-width:0; overflow-wrap:anywhere; font-size:.95rem; }
     .file button { flex:0 0 auto; min-height:36px; padding:.5rem .7rem; }
+    .file-tools { display:flex; gap:.4rem; flex-wrap:wrap; flex:0 0 auto; }
+    .file-tools a { display:inline-flex; align-items:center; justify-content:center; min-height:36px; margin:0; padding:.5rem .7rem; border-radius:7px; background:#334155; color:var(--text); }
+    h2 { font-size:1rem; margin:0 0 .75rem; }
+    #audioUpload { display:flex; gap:.75rem; flex-wrap:wrap; align-items:center; }
+    #alarmFile { min-width:0; max-width:100%; flex:1 1 240px; }
+    #uploadButton { flex:0 1 auto; }
+    button:disabled { opacity:.5; cursor:default; }
+    .training-file { border-top:1px solid var(--line); padding:.8rem 0; }
+    .training-file audio { display:block; width:100%; height:36px; }
+    @media (max-width:520px) {
+      body { padding:1rem; }
+      .file { flex-wrap:wrap; }
+      .path { flex:1 1 calc(100% - 3rem); }
+      .file-tools { width:100%; justify-content:flex-end; }
+    }
     .empty { color:var(--muted); padding:.75rem 0; }
     a { color:var(--muted); display:block; text-align:center; margin-top:1rem; text-decoration:none; }
     a:hover { color:var(--accent); }
@@ -1309,7 +1424,20 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
       </div>
     </section>
     <section>
+      <h2>Weckton hochladen</h2>
+      <form id="audioUpload" enctype="multipart/form-data">
+        <input type="file" id="alarmFile" name="file" accept=".mp3,.wav,.aac,.flac" aria-label="Weckton auswählen" required>
+        <button type="submit" id="uploadButton">Weckton hochladen</button>
+      </form>
+      <div class="empty" id="uploadStatus" role="status"></div>
+    </section>
+    <section>
+      <h2>Audiodateien</h2>
       <div id="fileList"><div class="empty">Dateien werden geladen ...</div></div>
+    </section>
+    <section>
+      <h2>Trainingsaufnahmen</h2>
+      <div id="sdTrainingList"><div class="empty">Aufnahmen werden geladen ...</div></div>
     </section>
     <a href="/">← Zurück zum Radio</a>
   </main>
@@ -1326,7 +1454,7 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
       if (!response.ok) throw new Error(text || 'Aktion fehlgeschlagen');
       return text;
     }
-    function row(file) {
+    function row(file, training = false) {
       const item = document.createElement('div');
       item.className = 'file';
       const icon = document.createElement('span');
@@ -1335,27 +1463,101 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
       const path = document.createElement('span');
       path.className = 'path';
       path.textContent = file.path;
+      const tools = document.createElement('div');
+      tools.className = 'file-tools';
       const play = document.createElement('button');
-      play.textContent = '▶ Play';
+      play.textContent = '▶';
+      play.title = 'Auf dem Gerät abspielen';
+      play.setAttribute('aria-label', play.title);
       play.onclick = () => request('/api/sd/play?path=' + encodeURIComponent(file.path))
         .then(() => message('Wiedergabe gestartet.', true)).catch(error => message(error.message, false));
       const alarm = document.createElement('button');
       alarm.className = 'secondary';
-      alarm.textContent = '⏰ Wecker';
+      alarm.textContent = '⏰';
+      alarm.title = 'Als Weckton speichern';
+      alarm.setAttribute('aria-label', alarm.title);
       alarm.onclick = () => request('/api/sd/alarm', { method:'POST', body:new URLSearchParams({ path:file.path }) })
         .then(() => message('Datei als Weckerquelle gespeichert.', true)).catch(error => message(error.message, false));
-      item.append(icon, path, play, alarm);
+      const download = document.createElement('a');
+      const trainingUrl = '/api/training/file?name=' + encodeURIComponent(file.name || '');
+      download.href = training ? trainingUrl + '&download=1' : '/api/sd/download?path=' + encodeURIComponent(file.path);
+      download.download = file.path.split('/').pop();
+      download.textContent = '⬇';
+      download.title = 'Herunterladen';
+      download.setAttribute('aria-label', download.title);
+      const remove = document.createElement('button');
+      remove.className = 'secondary';
+      remove.textContent = '🗑';
+      remove.title = 'Löschen';
+      remove.setAttribute('aria-label', remove.title);
+      remove.onclick = async () => {
+        if (!confirm('Datei "' + file.path + '" löschen?')) return;
+        remove.disabled = true;
+        try {
+          await request(training ? '/api/training/delete' : '/api/sd/delete', {
+            method:'POST', body:new URLSearchParams(training ? { name:file.name } : { path:file.path })
+          });
+          await loadFiles();
+          message('Datei gelöscht.', true);
+        } catch (error) { message(error.message, false); }
+        finally { remove.disabled = false; }
+      };
+      if (!training) tools.append(play, alarm);
+      tools.append(download, remove);
+      item.append(icon, path, tools);
+      if (training) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'training-file';
+        const player = document.createElement('audio');
+        player.controls = true;
+        player.preload = 'none';
+        player.src = trainingUrl;
+        wrapper.append(item, player);
+        return wrapper;
+      }
       return item;
     }
     async function loadFiles() {
       try {
-        const files = await fetch('/api/sd/files').then(response => response.json());
+        const [files, training] = await Promise.all([
+          fetch('/api/sd/files').then(response => { if (!response.ok) throw new Error('SD-Liste nicht erreichbar'); return response.json(); }),
+          fetch('/api/training/list').then(response => { if (!response.ok) throw new Error('Trainingsliste nicht erreichbar'); return response.json(); })
+        ]);
         list.replaceChildren();
-        if (!files.length) { list.innerHTML = '<div class="empty">Keine abspielbaren Dateien gefunden oder keine SD-Karte eingelegt.</div>'; return; }
+        if (!files.length) list.innerHTML = '<div class="empty">Keine abspielbaren Dateien gefunden oder keine SD-Karte eingelegt.</div>';
         files.forEach(file => list.appendChild(row(file)));
-        message(files.length + ' Datei(en) gefunden.', true);
+        const recordings = document.getElementById('sdTrainingList');
+        recordings.replaceChildren();
+        if (!training.files.length) recordings.innerHTML = '<div class="empty">Keine Trainingsaufnahmen vorhanden.</div>';
+        training.files.forEach(file => recordings.appendChild(row({ ...file, path:'/wakeword/training/' + file.name }, true)));
+        document.getElementById('uploadButton').disabled = !training.sd;
+        message(files.length + ' Audiodatei(en), ' + training.files.length + ' Trainingsaufnahme(n).', true);
       } catch (error) { list.innerHTML = '<div class="empty">SD-Dateien konnten nicht geladen werden.</div>'; message(error.message, false); }
     }
+    document.getElementById('audioUpload').addEventListener('submit', async event => {
+      event.preventDefault();
+      const input = document.getElementById('alarmFile');
+      const button = document.getElementById('uploadButton');
+      const feedback = document.getElementById('uploadStatus');
+      const file = input.files[0];
+      if (!file) return;
+      if (file.size > 20 * 1024 * 1024 || !file.size) {
+        feedback.textContent = 'Bitte eine Datei mit 1 Byte bis 20 MB auswählen.';
+        return;
+      }
+      button.disabled = true;
+      input.disabled = true;
+      feedback.textContent = 'Upload läuft...';
+      try {
+        const data = new FormData();
+        data.append('file', file);
+        const result = await request('/api/sd/upload', { method:'POST', body:data });
+        input.value = '';
+        await loadFiles();
+        feedback.textContent = result;
+      } catch (error) { feedback.textContent = error.message; }
+      finally { button.disabled = false; input.disabled = false; }
+    });
     function playAll() { request('/api/sd/play-all', { method:'POST' }).then(() => message('Alle Dateien werden nacheinander abgespielt.', true)).catch(error => message(error.message, false)); }
     function stopAll() { request('/api/sd/stop-all', { method:'POST' }).then(() => message('Wiedergabe gestoppt.', true)).catch(error => message(error.message, false)); }
     loadFiles();

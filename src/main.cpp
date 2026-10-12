@@ -14,6 +14,7 @@
 #include "mic_manager.h"
 #include "wake_word_manager.h"
 #include "wake_word_detector.h"
+#include "training_recorder.h"
 #include "tone_wav.h"
 #include <vector>
 
@@ -31,6 +32,10 @@ SdManager sdMgr;
 MicManager mic;
 WakeWordManager wakeWordMgr;
 WakeWordDetector wakeDetector;
+TrainingRecorder trainingRecorder;
+bool trainingPausedPlayback = false;
+String trainingLastFile;
+String trainingLastError;
 String wakeWordError;
 
 // Statusvariablen
@@ -91,6 +96,7 @@ void triggerAlarmPlayback();
 void clearSdPlayAll();
 void playAnnouncement(const String &url, int volume = -1);
 void resumeAfterAnnouncement();
+bool sdFileProtected(const String &path);
 
 String buildStationOptionsJson() {
     return stationMgr.favNamesJson();
@@ -207,7 +213,7 @@ void snapshotPlayback(PlaybackSnapshot &snapshot) {
     snapshot.sdPlayAllList = sdPlayAllPaths;
 }
 
-void restoreAfterSpeechCapture(bool recordingHadSpeech) {
+void restoreAfterSpeechCapture(bool recordingHadSpeech, bool playAck = true) {
     audio.stopSong();
     currentVolume = speechPreviousState.volume;
     audio.setVolume(currentVolume);
@@ -242,7 +248,7 @@ void restoreAfterSpeechCapture(bool recordingHadSpeech) {
     currentBitrate = "--";
     currentStreamUrl = "";
     isPlaying = false;
-    if (sdMgr.isMounted() && ensureWakeAckFile()) {
+    if (playAck && sdMgr.isMounted() && ensureWakeAckFile()) {
         audio.setVolume(5);
         currentStation = "Wake Word";
         currentTitle = recordingHadSpeech ? "Sprachaufnahme abgeschlossen" : "Keine Sprache erkannt";
@@ -317,6 +323,28 @@ void serviceWakeWordCapture() {
         currentStreamUrl = "";
         isPlaying = false;
     }
+}
+
+void serviceTrainingRecording() {
+    if (trainingRecorder.state() != TrainingRecorder::State::Finished) return;
+
+    String fileName;
+    String error;
+    if (sdMgr.isMounted() && trainingRecorder.save(sdMgr.filesystem(), fileName, error)) {
+        trainingLastFile = fileName;
+        trainingLastError = "";
+        Serial.printf("[%s] [TRAIN] Aufnahme gespeichert: %s/%s (%u ms)\n", logTimestamp().c_str(),
+                      TrainingRecorder::FOLDER, fileName.c_str(), (unsigned)trainingRecorder.elapsedMs());
+    } else {
+        trainingLastError = sdMgr.isMounted() ? error : String("Keine SD-Karte");
+        Serial.printf("[TRAIN] Aufnahme nicht gespeichert: %s\n", trainingLastError.c_str());
+    }
+    trainingRecorder.release();
+    if (!wakeDetector.isRunning()) mic.end();
+    if (trainingPausedPlayback) restoreAfterSpeechCapture(true, false);
+    trainingPausedPlayback = false;
+    mqttMgr.publishState(audio.isRunning(), currentStation, currentTitle, currentVolume,
+                         currentAnnounceVolume, isAnnouncing);
 }
 
 void loadPersistedVolume() {
@@ -562,7 +590,7 @@ void handleWakeWordStatus() {
 }
 
 void handleWakeWordSettings() {
-    if (speechCaptureActive) {
+    if (speechCaptureActive || trainingRecorder.state() != TrainingRecorder::State::Idle) {
         server.send(409, "text/plain", "Sprachaufnahme laeuft");
         return;
     }
@@ -598,7 +626,7 @@ void handleWakeWordSettings() {
 }
 
 void handleWakeWordSelect() {
-    if (speechCaptureActive) {
+    if (speechCaptureActive || trainingRecorder.state() != TrainingRecorder::State::Idle) {
         server.send(409, "text/plain", "Sprachaufnahme laeuft");
         return;
     }
@@ -723,8 +751,8 @@ void handleMicStart() {
 }
 
 void handleMicStop() {
-    // Mikrofon bleibt an, solange die Wake-Word-Erkennung es braucht
-    if (!wakeDetector.isRunning()) mic.end();
+    // Mikrofon bleibt an, solange Wake-Word-Erkennung oder Trainingsaufnahme es brauchen
+    if (!wakeDetector.isRunning() && trainingRecorder.state() == TrainingRecorder::State::Idle) mic.end();
     server.send(200, "text/plain", "OK");
 }
 
@@ -733,6 +761,124 @@ void handleMicStatus() {
                   ",\"dbfs\":" + String(mic.levelDbfs(), 1) +
                   ",\"error\":" + String(static_cast<int>(mic.lastError())) + "}";
     server.send(200, "application/json", json);
+}
+
+void handleTrainingStart() {
+    if (speechCaptureActive || speechUploadPending || isAnnouncing || wakeAckTonePlaying) {
+        server.send(409, "text/plain", "Sprachaufnahme oder Durchsage aktiv");
+        return;
+    }
+    if (trainingRecorder.state() != TrainingRecorder::State::Idle) {
+        server.send(409, "text/plain", "Aufnahme laeuft bereits");
+        return;
+    }
+    if (!sdMgr.isMounted()) {
+        server.send(409, "text/plain", "Keine SD-Karte");
+        return;
+    }
+    const String mode = server.arg("mode");
+    if (mode != "fixed" && mode != "manual") {
+        server.send(400, "text/plain", "Ungueltiger Modus");
+        return;
+    }
+
+    wakeDetector.end();
+    esp_err_t err = mic.begin(I2S_MIC_BCLK, I2S_MIC_LRC, I2S_MIC_DOUT);
+    if (err != ESP_OK) {
+        startWakeWord();
+        server.send(500, "text/plain", "I2S-Mikrofon konnte nicht gestartet werden: " + String(esp_err_to_name(err)));
+        return;
+    }
+
+    trainingPausedPlayback = !server.hasArg("pause") || server.arg("pause") == "1";
+    if (trainingPausedPlayback) {
+        snapshotPlayback(speechPreviousState);
+        clearSdPlayAll();
+        pendingSdNext = false;
+        if (speechPreviousState.wasPlaying) audio.stopSong();
+        isPlaying = false;
+        currentStation = "Trainingsaufnahme";
+        currentTitle = "Aufnahme laeuft...";
+        currentBitrate = "--";
+        currentStreamUrl = "";
+    }
+
+    String error;
+    if (!trainingRecorder.start(mic, mode == "fixed", error)) {
+        if (trainingPausedPlayback) restoreAfterSpeechCapture(false, false);
+        trainingPausedPlayback = false;
+        startWakeWord();
+        server.send(500, "text/plain", error);
+        return;
+    }
+    // Erkennung bleibt aus, bis ein Modell unter /wakeword wieder gewaehlt wird
+    wakeWordMgr.select("");
+    wakeWordError = "";
+    trainingLastError = "";
+    Serial.printf("[%s] [TRAIN] Aufnahme gestartet (%s)\n", logTimestamp().c_str(), mode.c_str());
+    server.send(200, "text/plain", "OK");
+}
+
+void handleTrainingStop() {
+    if (trainingRecorder.state() != TrainingRecorder::State::Recording) {
+        server.send(409, "text/plain", "Keine Aufnahme aktiv");
+        return;
+    }
+    trainingRecorder.requestStop();
+    server.send(200, "text/plain", "OK");
+}
+
+void handleTrainingStatus() {
+    const TrainingRecorder::State state = trainingRecorder.state();
+    const char *stateName = state == TrainingRecorder::State::Idle ? "idle" : (state == TrainingRecorder::State::Recording ? "recording" : "saving");
+    String json = String("{\"state\":\"") + stateName +
+                  "\",\"mode\":\"" + (trainingRecorder.fixedMode() ? "fixed" : "manual") +
+                  "\",\"elapsed_ms\":" + String((unsigned)trainingRecorder.elapsedMs()) +
+                  ",\"target_ms\":" + String((unsigned)trainingRecorder.targetMs()) +
+                  ",\"dbfs\":" + String(mic.levelDbfs(), 1) +
+                  ",\"sd\":" + String(sdMgr.isMounted() ? "true" : "false") +
+                  ",\"wakeword_enabled\":" + String(wakeDetector.isRunning() ? "true" : "false") +
+                  ",\"last_file\":\"" + StationManager::jsonEscape(trainingLastFile) +
+                  "\",\"error\":\"" + StationManager::jsonEscape(trainingLastError) + "\"}";
+    server.send(200, "application/json", json);
+}
+
+void handleTrainingList() {
+    server.send(200, "application/json", TrainingRecorder::listJson(sdMgr.isMounted() ? &sdMgr.filesystem() : nullptr));
+}
+
+void handleTrainingFile() {
+    const String name = server.arg("name");
+    if (!sdMgr.isMounted() || !TrainingRecorder::validName(name)) {
+        server.send(404, "text/plain", "Datei nicht gefunden");
+        return;
+    }
+    File file = sdMgr.filesystem().open(String(TrainingRecorder::FOLDER) + "/" + name, "r");
+    if (!file || file.isDirectory()) {
+        server.send(404, "text/plain", "Datei nicht gefunden");
+        return;
+    }
+    if (server.hasArg("download")) server.sendHeader("Content-Disposition", "attachment; filename=\"" + name + "\"");
+    server.streamFile(file, "audio/wav");
+    file.close();
+}
+
+void handleTrainingDelete() {
+    const String name = server.arg("name");
+    if (!sdMgr.isMounted() || !TrainingRecorder::validName(name)) {
+        server.send(404, "text/plain", "Datei nicht gefunden");
+        return;
+    }
+    const String path = String(TrainingRecorder::FOLDER) + "/" + name;
+    if (sdFileProtected(path)) {
+        server.send(409, "text/plain", "Datei wird abgespielt oder ist als Weckton ausgewaehlt");
+        return;
+    }
+    if (!sdMgr.filesystem().exists(path) || !sdMgr.filesystem().remove(path)) {
+        server.send(500, "text/plain", "Datei konnte nicht geloescht werden");
+        return;
+    }
+    server.send(200, "text/plain", "OK");
 }
 
 void handleStations() {
@@ -798,6 +944,136 @@ void handleFavoritePlay() {
 
 void handleSdFiles() {
     server.send(200, "application/json", sdMgr.filesJson());
+}
+
+bool sdFileProtected(const String &path) {
+    if ((audio.isRunning() && currentStreamUrl.equalsIgnoreCase(path)) ||
+        (trainingPausedPlayback && speechPreviousState.url.equalsIgnoreCase(path)) ||
+        (speechCaptureActive && speechPreviousState.url.equalsIgnoreCase(path)) ||
+        (isAnnouncing && previousState.url.equalsIgnoreCase(path)) ||
+        (alarmMgr.getSource() == "sd" && alarmMgr.getSdPath().equalsIgnoreCase(path))) return true;
+    for (const String &queued : sdPlayAllPaths) {
+        if (queued.equalsIgnoreCase(path)) return true;
+    }
+    return false;
+}
+
+void handleSdDownload() {
+    const String path = server.arg("path");
+    if (!sdMgr.isMounted() || !SdManager::isUserAudioPath(path)) {
+        server.send(400, "text/plain", "Ungueltiger Audiopfad oder keine SD-Karte");
+        return;
+    }
+    File file = sdMgr.filesystem().open(path, "r");
+    if (!file || file.isDirectory()) {
+        server.send(404, "text/plain", "Datei nicht gefunden");
+        return;
+    }
+    server.sendHeader("Content-Disposition", "attachment; filename=\"" + path.substring(path.lastIndexOf('/') + 1) + "\"");
+    server.streamFile(file, "application/octet-stream");
+    file.close();
+}
+
+void handleSdDelete() {
+    const String path = server.arg("path");
+    if (!sdMgr.isMounted() || !SdManager::isUserAudioPath(path)) {
+        server.send(400, "text/plain", "Ungueltiger Audiopfad oder keine SD-Karte");
+        return;
+    }
+    if (sdFileProtected(path)) {
+        server.send(409, "text/plain", "Datei wird abgespielt oder ist als Weckton ausgewaehlt");
+        return;
+    }
+    File file = sdMgr.filesystem().open(path, "r");
+    if (!file || file.isDirectory()) {
+        server.send(404, "text/plain", "Datei nicht gefunden");
+        return;
+    }
+    file.close();
+    const bool removed = sdMgr.filesystem().remove(path);
+    if (removed) mqttMgr.refreshDiscovery();
+    server.send(removed ? 200 : 500, "text/plain", removed ? "OK" : "Loeschen fehlgeschlagen");
+}
+
+File sdAudioUpload;
+String sdAudioUploadPath;
+String sdAudioUploadError;
+size_t sdAudioUploadBytes = 0;
+bool sdAudioUploadComplete = false;
+const char *SD_AUDIO_TEMP = "/alarm/.upload.part";
+const size_t SD_AUDIO_MAX_BYTES = 20 * 1024 * 1024;
+
+void abortSdAudioUpload(const String &error) {
+    if (sdAudioUpload) sdAudioUpload.close();
+    if (!sdAudioUploadPath.isEmpty() && sdMgr.isMounted()) sdMgr.filesystem().remove(SD_AUDIO_TEMP);
+    sdAudioUploadError = error;
+    sdAudioUploadComplete = false;
+}
+
+void handleSdAudioUpload() {
+    HTTPUpload &upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+        if (!sdAudioUploadPath.isEmpty() || !sdAudioUploadError.isEmpty()) {
+            abortSdAudioUpload("Nur eine Datei pro Upload erlaubt");
+            return;
+        }
+        sdAudioUploadBytes = 0;
+        sdAudioUploadComplete = false;
+        if (!sdMgr.isMounted() || speechCaptureActive || trainingRecorder.state() != TrainingRecorder::State::Idle) {
+            abortSdAudioUpload("Keine SD-Karte oder Aufnahme aktiv");
+            return;
+        }
+        const String name = upload.filename;
+        if (name.isEmpty() || name.length() > 100 || name.startsWith(".") || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0 ||
+            !SdManager::isUserAudioPath("/alarm/" + name)) {
+            abortSdAudioUpload("Ungueltiger Dateiname (MP3, WAV, AAC oder FLAC erforderlich)");
+            return;
+        }
+        sdAudioUploadPath = "/alarm/" + name;
+        if (sdMgr.exists(sdAudioUploadPath)) {
+            abortSdAudioUpload("Datei existiert bereits; bitte anderen Namen verwenden");
+            return;
+        }
+        if (!sdMgr.filesystem().exists("/alarm") && !sdMgr.filesystem().mkdir("/alarm")) {
+            abortSdAudioUpload("Ordner /alarm konnte nicht angelegt werden");
+            return;
+        }
+        sdMgr.filesystem().remove(SD_AUDIO_TEMP);
+        sdAudioUpload = sdMgr.filesystem().open(SD_AUDIO_TEMP, "w");
+        if (!sdAudioUpload) abortSdAudioUpload("Upload-Datei konnte nicht erstellt werden");
+    } else if (upload.status == UPLOAD_FILE_WRITE && sdAudioUploadError.isEmpty()) {
+        if (upload.currentSize > SD_AUDIO_MAX_BYTES - sdAudioUploadBytes) {
+            abortSdAudioUpload("Datei zu gross (max. 20 MB)");
+        } else if (!sdAudioUpload || sdAudioUpload.write(upload.buf, upload.currentSize) != upload.currentSize) {
+            abortSdAudioUpload("Schreiben fehlgeschlagen (SD voll?)");
+        } else {
+            sdAudioUploadBytes += upload.currentSize;
+        }
+    } else if (upload.status == UPLOAD_FILE_END && sdAudioUploadError.isEmpty()) {
+        if (sdAudioUpload) sdAudioUpload.close();
+        if (!sdAudioUploadBytes || sdAudioUploadBytes != upload.totalSize) abortSdAudioUpload("Upload unvollstaendig oder leer");
+        else sdAudioUploadComplete = true;
+    } else if (upload.status == UPLOAD_FILE_ABORTED) {
+        abortSdAudioUpload("Upload abgebrochen");
+        sdAudioUploadPath = "";
+        sdAudioUploadError = "";
+    }
+}
+
+void handleSdAudioUploadResult() {
+    if (sdAudioUploadComplete && sdAudioUploadError.isEmpty()) {
+        if (sdMgr.exists(sdAudioUploadPath) || !sdMgr.filesystem().rename(SD_AUDIO_TEMP, sdAudioUploadPath)) {
+            abortSdAudioUpload("Datei konnte nicht gespeichert werden");
+        }
+    } else if (sdAudioUploadError.isEmpty()) {
+        abortSdAudioUpload("Keine vollstaendige Datei empfangen");
+    }
+    const bool success = sdAudioUploadComplete && sdAudioUploadError.isEmpty();
+    server.send(success ? 200 : 400, "text/plain", success ? "Gespeichert: " + sdAudioUploadPath : sdAudioUploadError);
+    sdAudioUploadPath = "";
+    sdAudioUploadError = "";
+    sdAudioUploadComplete = false;
+    if (success) mqttMgr.refreshDiscovery();
 }
 
 void handleSdPlay() {
@@ -1106,6 +1382,12 @@ void setup() {
     server.on("/api/mic/start", HTTP_POST, handleMicStart);
     server.on("/api/mic/stop", HTTP_POST, handleMicStop);
     server.on("/api/mic/status", HTTP_GET, handleMicStatus);
+    server.on("/api/training/start", HTTP_POST, handleTrainingStart);
+    server.on("/api/training/stop", HTTP_POST, handleTrainingStop);
+    server.on("/api/training/status", HTTP_GET, handleTrainingStatus);
+    server.on("/api/training/list", HTTP_GET, handleTrainingList);
+    server.on("/api/training/file", HTTP_GET, handleTrainingFile);
+    server.on("/api/training/delete", HTTP_POST, handleTrainingDelete);
     server.on("/api/station", HTTP_GET, handleStation);
     server.on("/api/play", HTTP_GET, handlePlay);
     server.on("/api/announce", HTTP_GET, handleAnnounce);
@@ -1126,6 +1408,9 @@ void setup() {
     server.on("/api/favorites/remove", HTTP_POST, handleFavoriteRemove);
     server.on("/api/favorite", HTTP_GET, handleFavoritePlay);
     server.on("/api/sd/files", HTTP_GET, handleSdFiles);
+    server.on("/api/sd/download", HTTP_GET, handleSdDownload);
+    server.on("/api/sd/delete", HTTP_POST, handleSdDelete);
+    server.on("/api/sd/upload", HTTP_POST, handleSdAudioUploadResult, handleSdAudioUpload);
     server.on("/api/sd/play", HTTP_GET, handleSdPlay);
     server.on("/api/sd/play", HTTP_POST, handleSdPlay);
     server.on("/api/sd/alarm", HTTP_POST, handleSdAlarm);
@@ -1168,6 +1453,7 @@ void loop() {
     mqttMgr.loop();
 
     serviceWakeWordCapture();
+    serviceTrainingRecording();
 
     // Timeout-Schutz für Durchsagen, falls der TTS-Stream abreißt
     if (isAnnouncing) {
