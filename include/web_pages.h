@@ -468,6 +468,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         .then(data => {
           const box = document.getElementById('trainingList');
           box.innerHTML = '';
+          const count = document.createElement('a');
+          count.href = '/sdcard';
+          count.className = 'hint';
+          count.textContent = data.files.length + (data.files.length === 1 ? ' Aufnahme' : ' Aufnahmen');
+          box.appendChild(count);
           if (!data.files.length) {
             const hint = document.createElement('div');
             hint.className = 'hint';
@@ -475,36 +480,35 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             box.appendChild(hint);
             return;
           }
-          data.files.forEach(f => {
-            const url = '/api/training/file?name=' + encodeURIComponent(f.name);
-            const item = document.createElement('div');
-            item.className = 'train-item';
-            const head = document.createElement('div');
-            head.className = 'train-head';
-            const label = document.createElement('span');
-            label.textContent = f.name + ' · ' + (Math.max(0, f.size - 44) / 32000).toFixed(1) + ' s';
-            const download = document.createElement('a');
-            download.href = url + '&download=1';
-            download.download = f.name;
-            download.textContent = '⬇';
-            download.title = 'Herunterladen';
-            const del = document.createElement('button');
-            del.textContent = '🗑';
-            del.title = 'Löschen';
-            del.onclick = () => {
-              if (!confirm('Aufnahme "' + f.name + '" löschen?')) return;
-              postForm('/api/training/delete', { name: f.name })
-                .then(loadTrainingList)
-                .catch(error => { document.getElementById('micError').innerText = 'Löschen fehlgeschlagen: ' + error; });
-            };
-            head.append(label, download, del);
-            const player = document.createElement('audio');
-            player.controls = true;
-            player.preload = 'none';
-            player.src = url;
-            item.append(head, player);
-            box.appendChild(item);
-          });
+          const f = data.files[0];
+          const url = '/api/training/file?name=' + encodeURIComponent(f.name);
+          const item = document.createElement('div');
+          item.className = 'train-item';
+          const head = document.createElement('div');
+          head.className = 'train-head';
+          const label = document.createElement('span');
+          label.textContent = f.name + ' · ' + (Math.max(0, f.size - 44) / 32000).toFixed(1) + ' s';
+          const download = document.createElement('a');
+          download.href = url + '&download=1';
+          download.download = f.name;
+          download.textContent = '⬇';
+          download.title = 'Herunterladen';
+          const del = document.createElement('button');
+          del.textContent = '🗑';
+          del.title = 'Löschen';
+          del.onclick = () => {
+            if (!confirm('Aufnahme "' + f.name + '" löschen?')) return;
+            postForm('/api/training/delete', { name: f.name })
+              .then(loadTrainingList)
+              .catch(error => { document.getElementById('micError').innerText = 'Löschen fehlgeschlagen: ' + error; });
+          };
+          head.append(label, download, del);
+          const player = document.createElement('audio');
+          player.controls = true;
+          player.preload = 'none';
+          player.src = url;
+          item.append(head, player);
+          box.appendChild(item);
         })
         .catch(() => { document.getElementById('trainingList').innerText = 'Aufnahmen konnten nicht geladen werden.'; });
     }
