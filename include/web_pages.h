@@ -1165,6 +1165,19 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
     .file-icon { flex:0 0 auto; font-size:1.4rem; }
     .path { flex:1; min-width:0; overflow-wrap:anywhere; font-size:.95rem; }
     .file button { flex:0 0 auto; min-height:36px; padding:.5rem .7rem; }
+    .file-tools { display:flex; gap:.4rem; flex-wrap:wrap; flex:0 0 auto; }
+    .file-tools a { display:inline-flex; align-items:center; justify-content:center; min-height:36px; margin:0; padding:.5rem .7rem; border-radius:7px; background:#334155; color:var(--text); }
+    h2 { font-size:1rem; margin:0 0 .75rem; }
+    #audioUpload { display:flex; gap:.75rem; flex-wrap:wrap; align-items:center; }
+    #alarmFile { min-width:0; max-width:100%; flex:1 1 240px; }
+    #uploadButton { flex:0 1 auto; }
+    button:disabled { opacity:.5; cursor:default; }
+    @media (max-width:520px) {
+      body { padding:1rem; }
+      .file { flex-wrap:wrap; }
+      .path { flex:1 1 calc(100% - 3rem); }
+      .file-tools { width:100%; justify-content:flex-end; }
+    }
     .empty { color:var(--muted); padding:.75rem 0; }
     a { color:var(--muted); display:block; text-align:center; margin-top:1rem; text-decoration:none; }
     a:hover { color:var(--accent); }
@@ -1183,6 +1196,15 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
       </div>
     </section>
     <section>
+      <h2>Weckton hochladen</h2>
+      <form id="audioUpload" enctype="multipart/form-data">
+        <input type="file" id="alarmFile" name="file" accept=".mp3,.wav,.aac,.flac" aria-label="Weckton auswählen" required>
+        <button type="submit" id="uploadButton">Weckton hochladen</button>
+      </form>
+      <div class="empty" id="uploadStatus" role="status"></div>
+    </section>
+    <section>
+      <h2>Audiodateien</h2>
       <div id="fileList"><div class="empty">Dateien werden geladen ...</div></div>
     </section>
     <a href="/">← Zurück zum Radio</a>
@@ -1209,27 +1231,82 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
       const path = document.createElement('span');
       path.className = 'path';
       path.textContent = file.path;
+      const tools = document.createElement('div');
+      tools.className = 'file-tools';
       const play = document.createElement('button');
-      play.textContent = '▶ Play';
+      play.textContent = '▶';
+      play.title = 'Auf dem Gerät abspielen';
+      play.setAttribute('aria-label', play.title);
       play.onclick = () => request('/api/sd/play?path=' + encodeURIComponent(file.path))
         .then(() => message('Wiedergabe gestartet.', true)).catch(error => message(error.message, false));
       const alarm = document.createElement('button');
       alarm.className = 'secondary';
-      alarm.textContent = '⏰ Wecker';
+      alarm.textContent = '⏰';
+      alarm.title = 'Als Weckton speichern';
+      alarm.setAttribute('aria-label', alarm.title);
       alarm.onclick = () => request('/api/sd/alarm', { method:'POST', body:new URLSearchParams({ path:file.path }) })
         .then(() => message('Datei als Weckerquelle gespeichert.', true)).catch(error => message(error.message, false));
-      item.append(icon, path, play, alarm);
+      const download = document.createElement('a');
+      download.href = '/api/sd/download?path=' + encodeURIComponent(file.path);
+      download.download = file.path.split('/').pop();
+      download.textContent = '⬇';
+      download.title = 'Herunterladen';
+      download.setAttribute('aria-label', download.title);
+      const remove = document.createElement('button');
+      remove.className = 'secondary';
+      remove.textContent = '🗑';
+      remove.title = 'Löschen';
+      remove.setAttribute('aria-label', remove.title);
+      remove.onclick = async () => {
+        if (!confirm('Datei "' + file.path + '" löschen?')) return;
+        remove.disabled = true;
+        try {
+          await request('/api/sd/delete', { method:'POST', body:new URLSearchParams({ path:file.path }) });
+          await loadFiles();
+          message('Datei gelöscht.', true);
+        } catch (error) { message(error.message, false); }
+        finally { remove.disabled = false; }
+      };
+      tools.append(play, alarm, download, remove);
+      item.append(icon, path, tools);
       return item;
     }
     async function loadFiles() {
       try {
-        const files = await fetch('/api/sd/files').then(response => response.json());
+        const files = await fetch('/api/sd/files').then(response => {
+          if (!response.ok) throw new Error('SD-Liste nicht erreichbar');
+          return response.json();
+        });
         list.replaceChildren();
         if (!files.length) { list.innerHTML = '<div class="empty">Keine abspielbaren Dateien gefunden oder keine SD-Karte eingelegt.</div>'; return; }
         files.forEach(file => list.appendChild(row(file)));
         message(files.length + ' Datei(en) gefunden.', true);
       } catch (error) { list.innerHTML = '<div class="empty">SD-Dateien konnten nicht geladen werden.</div>'; message(error.message, false); }
     }
+    document.getElementById('audioUpload').addEventListener('submit', async event => {
+      event.preventDefault();
+      const input = document.getElementById('alarmFile');
+      const button = document.getElementById('uploadButton');
+      const feedback = document.getElementById('uploadStatus');
+      const file = input.files[0];
+      if (!file) return;
+      if (file.size > 20 * 1024 * 1024 || !file.size) {
+        feedback.textContent = 'Bitte eine Datei mit 1 Byte bis 20 MB auswählen.';
+        return;
+      }
+      button.disabled = true;
+      input.disabled = true;
+      feedback.textContent = 'Upload läuft...';
+      try {
+        const data = new FormData();
+        data.append('file', file);
+        const result = await request('/api/sd/upload', { method:'POST', body:data });
+        input.value = '';
+        await loadFiles();
+        feedback.textContent = result;
+      } catch (error) { feedback.textContent = error.message; }
+      finally { button.disabled = false; input.disabled = false; }
+    });
     function playAll() { request('/api/sd/play-all', { method:'POST' }).then(() => message('Alle Dateien werden nacheinander abgespielt.', true)).catch(error => message(error.message, false)); }
     function stopAll() { request('/api/sd/stop-all', { method:'POST' }).then(() => message('Wiedergabe gestoppt.', true)).catch(error => message(error.message, false)); }
     loadFiles();

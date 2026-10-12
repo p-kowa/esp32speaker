@@ -523,6 +523,134 @@ void handleSdFiles() {
     server.send(200, "application/json", sdMgr.filesJson());
 }
 
+bool sdFileProtected(const String &path) {
+    if ((audio.isRunning() && currentStreamUrl.equalsIgnoreCase(path)) ||
+        (isAnnouncing && previousState.url.equalsIgnoreCase(path)) ||
+        (alarmMgr.getSource() == "sd" && alarmMgr.getSdPath().equalsIgnoreCase(path))) return true;
+    for (const String &queued : sdPlayAllPaths) {
+        if (queued.equalsIgnoreCase(path)) return true;
+    }
+    return false;
+}
+
+void handleSdDownload() {
+    const String path = server.arg("path");
+    if (!sdMgr.isMounted() || !SdManager::isUserAudioPath(path)) {
+        server.send(400, "text/plain", "Ungueltiger Audiopfad oder keine SD-Karte");
+        return;
+    }
+    File file = sdMgr.filesystem().open(path, "r");
+    if (!file || file.isDirectory()) {
+        server.send(404, "text/plain", "Datei nicht gefunden");
+        return;
+    }
+    server.sendHeader("Content-Disposition", "attachment; filename=\"" + path.substring(path.lastIndexOf('/') + 1) + "\"");
+    server.streamFile(file, "application/octet-stream");
+    file.close();
+}
+
+void handleSdDelete() {
+    const String path = server.arg("path");
+    if (!sdMgr.isMounted() || !SdManager::isUserAudioPath(path)) {
+        server.send(400, "text/plain", "Ungueltiger Audiopfad oder keine SD-Karte");
+        return;
+    }
+    if (sdFileProtected(path)) {
+        server.send(409, "text/plain", "Datei wird abgespielt oder ist als Weckton ausgewaehlt");
+        return;
+    }
+    File file = sdMgr.filesystem().open(path, "r");
+    if (!file || file.isDirectory()) {
+        server.send(404, "text/plain", "Datei nicht gefunden");
+        return;
+    }
+    file.close();
+    const bool removed = sdMgr.filesystem().remove(path);
+    if (removed) mqttMgr.refreshDiscovery();
+    server.send(removed ? 200 : 500, "text/plain", removed ? "OK" : "Loeschen fehlgeschlagen");
+}
+
+File sdAudioUpload;
+String sdAudioUploadPath;
+String sdAudioUploadError;
+size_t sdAudioUploadBytes = 0;
+bool sdAudioUploadComplete = false;
+const char *SD_AUDIO_TEMP = "/alarm/.upload.part";
+const size_t SD_AUDIO_MAX_BYTES = 20 * 1024 * 1024;
+
+void abortSdAudioUpload(const String &error) {
+    if (sdAudioUpload) sdAudioUpload.close();
+    if (!sdAudioUploadPath.isEmpty() && sdMgr.isMounted()) sdMgr.filesystem().remove(SD_AUDIO_TEMP);
+    sdAudioUploadError = error;
+    sdAudioUploadComplete = false;
+}
+
+void handleSdAudioUpload() {
+    HTTPUpload &upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+        if (!sdAudioUploadPath.isEmpty() || !sdAudioUploadError.isEmpty()) {
+            abortSdAudioUpload("Nur eine Datei pro Upload erlaubt");
+            return;
+        }
+        sdAudioUploadBytes = 0;
+        sdAudioUploadComplete = false;
+        if (!sdMgr.isMounted()) {
+            abortSdAudioUpload("Keine SD-Karte");
+            return;
+        }
+        const String name = upload.filename;
+        if (name.isEmpty() || name.length() > 100 || name.startsWith(".") || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0 ||
+            !SdManager::isUserAudioPath("/alarm/" + name)) {
+            abortSdAudioUpload("Ungueltiger Dateiname (MP3, WAV, AAC oder FLAC erforderlich)");
+            return;
+        }
+        sdAudioUploadPath = "/alarm/" + name;
+        if (sdMgr.exists(sdAudioUploadPath)) {
+            abortSdAudioUpload("Datei existiert bereits; bitte anderen Namen verwenden");
+            return;
+        }
+        if (!sdMgr.filesystem().exists("/alarm") && !sdMgr.filesystem().mkdir("/alarm")) {
+            abortSdAudioUpload("Ordner /alarm konnte nicht angelegt werden");
+            return;
+        }
+        sdMgr.filesystem().remove(SD_AUDIO_TEMP);
+        sdAudioUpload = sdMgr.filesystem().open(SD_AUDIO_TEMP, "w");
+        if (!sdAudioUpload) abortSdAudioUpload("Upload-Datei konnte nicht erstellt werden");
+    } else if (upload.status == UPLOAD_FILE_WRITE && sdAudioUploadError.isEmpty()) {
+        if (upload.currentSize > SD_AUDIO_MAX_BYTES - sdAudioUploadBytes) {
+            abortSdAudioUpload("Datei zu gross (max. 20 MB)");
+        } else if (!sdAudioUpload || sdAudioUpload.write(upload.buf, upload.currentSize) != upload.currentSize) {
+            abortSdAudioUpload("Schreiben fehlgeschlagen (SD voll?)");
+        } else {
+            sdAudioUploadBytes += upload.currentSize;
+        }
+    } else if (upload.status == UPLOAD_FILE_END && sdAudioUploadError.isEmpty()) {
+        if (sdAudioUpload) sdAudioUpload.close();
+        if (!sdAudioUploadBytes || sdAudioUploadBytes != upload.totalSize) abortSdAudioUpload("Upload unvollstaendig oder leer");
+        else sdAudioUploadComplete = true;
+    } else if (upload.status == UPLOAD_FILE_ABORTED) {
+        abortSdAudioUpload("Upload abgebrochen");
+        sdAudioUploadPath = "";
+        sdAudioUploadError = "";
+    }
+}
+
+void handleSdAudioUploadResult() {
+    if (sdAudioUploadComplete && sdAudioUploadError.isEmpty()) {
+        if (sdMgr.exists(sdAudioUploadPath) || !sdMgr.filesystem().rename(SD_AUDIO_TEMP, sdAudioUploadPath)) {
+            abortSdAudioUpload("Datei konnte nicht gespeichert werden");
+        }
+    } else if (sdAudioUploadError.isEmpty()) {
+        abortSdAudioUpload("Keine vollstaendige Datei empfangen");
+    }
+    const bool success = sdAudioUploadComplete && sdAudioUploadError.isEmpty();
+    server.send(success ? 200 : 400, "text/plain", success ? "Gespeichert: " + sdAudioUploadPath : sdAudioUploadError);
+    sdAudioUploadPath = "";
+    sdAudioUploadError = "";
+    sdAudioUploadComplete = false;
+    if (success) mqttMgr.refreshDiscovery();
+}
+
 void handleSdPlay() {
     if (!server.hasArg("path") || !sdMgr.exists(server.arg("path"))) {
         server.send(404, "text/plain", "SD-Datei nicht gefunden");
@@ -828,6 +956,9 @@ void setup() {
     server.on("/api/favorites/remove", HTTP_POST, handleFavoriteRemove);
     server.on("/api/favorite", HTTP_GET, handleFavoritePlay);
     server.on("/api/sd/files", HTTP_GET, handleSdFiles);
+    server.on("/api/sd/download", HTTP_GET, handleSdDownload);
+    server.on("/api/sd/delete", HTTP_POST, handleSdDelete);
+    server.on("/api/sd/upload", HTTP_POST, handleSdAudioUploadResult, handleSdAudioUpload);
     server.on("/api/sd/play", HTTP_GET, handleSdPlay);
     server.on("/api/sd/play", HTTP_POST, handleSdPlay);
     server.on("/api/sd/alarm", HTTP_POST, handleSdAlarm);

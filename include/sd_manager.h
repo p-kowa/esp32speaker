@@ -43,6 +43,23 @@ private:
     }
 
 public:
+    static bool isUserAudioPath(const String &path) {
+        if (!path.startsWith("/") || !isPlayable(path)) return false;
+        if (path.indexOf('\\') >= 0 || path.indexOf('"') >= 0) return false;
+        int start = 1;
+        while (start < (int)path.length()) {
+            int end = path.indexOf('/', start);
+            if (end < 0) end = path.length();
+            const String part = path.substring(start, end);
+            if (part.isEmpty() || part == "." || part == ".." || part.endsWith(".") || part.endsWith(" ")) return false;
+            start = end + 1;
+        }
+        for (size_t index = 0; index < path.length(); ++index) {
+            if ((uint8_t)path[index] < 32 || path[index] == 127) return false;
+        }
+        return true;
+    }
+
     bool begin() {
         SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
         mounted = SD.begin(SD_CS, SPI, 20000000);
