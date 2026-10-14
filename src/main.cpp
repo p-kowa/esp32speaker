@@ -215,6 +215,7 @@ void snapshotPlayback(PlaybackSnapshot &snapshot) {
 
 void restoreAfterSpeechCapture(bool recordingHadSpeech, bool playAck = true) {
     audio.stopSong();
+    digitalWrite(LED_PIN, LOW); // LED ausschalten, da Wake Ack abgeschlossen ist
     currentVolume = speechPreviousState.volume;
     audio.setVolume(currentVolume);
     if (speechPreviousState.wasPlaying) {
@@ -274,6 +275,7 @@ void serviceWakeWordCapture() {
     }
 
     if (wakeDetector.takeDetection() && !speechCaptureActive && !isAnnouncing) {
+        digitalWrite(LED_PIN, HIGH); // LED einschalten, um Wake Word Erkennung anzuzeigen
         Serial.printf("[%s] [WAKE] Wake Word '%s' erkannt (%u)\n", logTimestamp().c_str(), wakeWordMgr.selected().c_str(),
                       (unsigned)wakeDetector.detectionCount());
         snapshotPlayback(speechPreviousState);
@@ -315,6 +317,7 @@ void serviceWakeWordCapture() {
     if (pendingWakeAckDone) {
         pendingWakeAckDone = false;
         wakeAckTonePlaying = false;
+        digitalWrite(LED_PIN, LOW);
         audio.setVolume(currentVolume);
         if (sdMgr.isMounted()) sdMgr.filesystem().remove(WAKE_ACK_WAV);
         currentStation = "Gestoppt";
@@ -1327,6 +1330,8 @@ void handleMqttStatus() {
 
 void setup() {
     Serial.begin(115200);
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW); // Initialzustand der LED auf AUS setzen
     // Warte kurz, bis der native USB-CDC Port verbunden ist
     unsigned long startMs = millis();
     while (!Serial && (millis() - startMs < 2500)) {

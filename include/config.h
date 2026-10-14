@@ -28,3 +28,8 @@
 #define I2S_MIC_LRC     16   // Word Select / Left Right Clock (LRC / WS)
 #define I2S_MIC_DOUT    21   // Data Out vom ICS43434 (DOUT)
 // ==========================================
+
+// ==========================================
+// 5. LED Pin-Belegung für ESP32-S3
+// ==========================================
+#define LED_PIN         15   // Beispiel: Pin für eine Status-LED
