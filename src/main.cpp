@@ -16,12 +16,13 @@
 #include "wake_word_detector.h"
 #include "training_recorder.h"
 #include "tone_wav.h"
+#include "language.h"
 #include <vector>
 
-// Reserve fuer Webserver-Upload (M3U-Import) und Senderdatei-Zugriffe im loopTask
+// Stack reserve for web server uploads (M3U import) and station file access in the loop task
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 
-// Instanzen
+// Instances
 Audio audio;
 WebServer server(80);
 WiFiConfigManager wifiMgr;
@@ -38,9 +39,11 @@ String trainingLastFile;
 String trainingLastError;
 String wakeWordError;
 
-// Statusvariablen
-String currentStation = "Bereit (Kein Sender gewählt)";
-String currentTitle = "Kein Titel";
+// State variables
+// Language-independent marker: the code detects SD playback via this station name prefix
+constexpr const char *SD_STATION_PREFIX = "SD: ";
+String currentStation = STATUS_READY_NO_STATION;
+String currentTitle = STATUS_NO_TITLE;
 String currentBitrate = "--";
 String currentStreamUrl = "";
 int currentVolume = DEFAULT_VOLUME;
@@ -53,7 +56,9 @@ Preferences audioPrefs;
 std::vector<String> sdPlayAllPaths;
 size_t sdPlayAllIndex = 0;
 bool sdPlayAllActive = false;
-// Von Audio-Callbacks gesetzt, in loop() ausgefuehrt (kein Neustart innerhalb audio.loop())
+// True while an alarm (real or test) is the current playback; cleared whenever other playback starts
+bool alarmPlayback = false;
+// Set by audio callbacks, handled in loop() (no restart from within audio.loop())
 volatile bool pendingResume = false;
 volatile bool pendingSdNext = false;
 // Fallback, wenn WAKE_ACK_JSON auf der SD fehlt oder ungueltig ist
@@ -65,7 +70,7 @@ const String beepTone = R"json([
 const char *WAKE_ACK_JSON = "/wakeword/beep.json";
 const char *WAKE_ACK_WAV = "/wakeword/ack.wav";
 
-// Snapshot & Durchsage (Announcement / TTS) Status
+// Snapshot and announcement (announcement / TTS) state
 struct PlaybackSnapshot {
     bool wasPlaying = false;
     String station = "";
@@ -92,7 +97,7 @@ const unsigned long ANNOUNCE_IDLE_TIMEOUT_MS = 10000;
 const unsigned long ANNOUNCE_MAX_MS = 300000;
 
 void stopPlayback();
-void triggerAlarmPlayback();
+bool alarmPlaybackActive() { return alarmPlayback && audio.isRunning(); }void triggerAlarmPlayback();
 void clearSdPlayAll();
 void playAnnouncement(const String &url, int volume = -1);
 void resumeAfterAnnouncement();
@@ -125,9 +130,10 @@ void savePersistedRadioPower(bool powerOn) {
 
 bool startSdPath(const String &path, bool persistPower = true) {
     if (!sdMgr.isMounted() || !sdMgr.exists(path)) return false;
+    alarmPlayback = false;
     audio.stopSong();
-    currentStation = "SD: " + path;
-    currentTitle = "Lokale Datei";
+    currentStation = String(SD_STATION_PREFIX) + path;
+    currentTitle = STATUS_LOCAL_FILE;
     currentBitrate = "--";
     currentStreamUrl = path;
     audio.setVolume(currentVolume);
@@ -145,8 +151,9 @@ void clearSdPlayAll() {
 void startStream(const String &name, const String &url, bool persistPower = true) {
     if (url.isEmpty()) return;
     clearSdPlayAll();
+    alarmPlayback = false;
     currentStation = name;
-    currentTitle = "Verbinde...";
+    currentTitle = STATUS_CONNECTING;
     currentBitrate = "--";
     currentStreamUrl = url;
     isPlaying = true;
@@ -215,6 +222,7 @@ void snapshotPlayback(PlaybackSnapshot &snapshot) {
 
 void restoreAfterSpeechCapture(bool recordingHadSpeech, bool playAck = true) {
     audio.stopSong();
+    alarmPlayback = false;
     digitalWrite(LED_PIN, LOW); // LED ausschalten, da Wake Ack abgeschlossen ist
     currentVolume = speechPreviousState.volume;
     audio.setVolume(currentVolume);
@@ -281,6 +289,7 @@ void serviceWakeWordCapture() {
         snapshotPlayback(speechPreviousState);
         clearSdPlayAll();
         pendingSdNext = false;
+        alarmPlayback = false;
         if (speechPreviousState.wasPlaying) audio.stopSong();
         isPlaying = false;
         currentStation = "Sprachaufnahme";
@@ -385,14 +394,14 @@ void setAnnounceVolume(int value) {
 void playAnnouncement(const String &url, int volume) {
     if (url.isEmpty()) return;
 
-    // Falls gerade schon eine Durchsage läuft, nicht neu snapshotten
+    // If an announcement is already running, do not take a new snapshot
     if (!isAnnouncing) {
         previousState.wasPlaying = audio.isRunning() || isPlaying;
         previousState.station = currentStation;
         previousState.title = currentTitle;
         previousState.url = currentStreamUrl;
         previousState.volume = currentVolume;
-        previousState.isSd = currentStation.startsWith("SD: ");
+        previousState.isSd = currentStation.startsWith(SD_STATION_PREFIX);
         previousState.sdPath = previousState.isSd ? currentStreamUrl : "";
         previousState.sdPlayAll = sdPlayAllActive;
         previousState.sdPlayAllIdx = sdPlayAllIndex;
@@ -400,6 +409,7 @@ void playAnnouncement(const String &url, int volume) {
     }
 
     isAnnouncing = true;
+    alarmPlayback = false;
     announceStartMs = millis();
     announceLastActiveMs = announceStartMs;
 
@@ -408,13 +418,13 @@ void playAnnouncement(const String &url, int volume) {
     clearSdPlayAll();
 
     audio.setVolume(targetVol);
-    currentStation = "📢 DURCHSAGE";
-    currentTitle = "Sprachausgabe...";
+    currentStation = STATUS_ANNOUNCEMENT;
+    currentTitle = STATUS_SPEAKING;
     currentBitrate = "--";
     currentStreamUrl = url;
     isPlaying = true;
 
-    Serial.printf("[ANNOUNCE] Starte Durchsage (%s) mit Lautstaerke %d (Vorher: wasPlaying=%d, vol=%d)\n",
+    Serial.printf("[ANNOUNCE] Starting announcement (%s) at volume %d (before: wasPlaying=%d, vol=%d)\n",
                   url.c_str(), targetVol, previousState.wasPlaying, previousState.volume);
     
     mqttMgr.publishState(true, currentStation, currentTitle, targetVol, currentAnnounceVolume, true);
@@ -425,7 +435,7 @@ void resumeAfterAnnouncement() {
     if (!isAnnouncing) return;
     isAnnouncing = false;
 
-    Serial.printf("[ANNOUNCE] Beende Durchsage. Wiederherstellung: wasPlaying=%d, isSd=%d, vol=%d\n",
+    Serial.printf("[ANNOUNCE] Announcement finished. Restoring: wasPlaying=%d, isSd=%d, vol=%d\n",
                   previousState.wasPlaying, previousState.isSd, previousState.volume);
 
     audio.stopSong();
@@ -445,7 +455,7 @@ void resumeAfterAnnouncement() {
                 startSdPath(previousState.sdPath, false);
             }
         } else if (!previousState.url.isEmpty()) {
-            startStream(previousState.station.isEmpty() ? "Radio" : previousState.station, previousState.url, false);
+            startStream(previousState.station.isEmpty() ? String(STATUS_RADIO) : previousState.station, previousState.url, false);
         }
     } else {
         stopPlayback();
@@ -462,10 +472,10 @@ void handleMqttCommand(const String &topic, const String &payload) {
         setRadioVolume(payload.toInt());
     } else if (topic.endsWith("/set/station")) {
         StoredStation station;
-        if (payload.indexOf("://") >= 0) startStream("Custom Stream", payload);
+        if (payload.indexOf("://") >= 0) startStream(STATUS_CUSTOM_STREAM, payload);
         else if (stationMgr.get(payload.toInt(), station)) playStoredStation(station);
     } else if (topic.endsWith("/set/station_url")) {
-        startStream("Custom Stream", payload);
+        startStream(STATUS_CUSTOM_STREAM, payload);
     } else if (topic.endsWith("/set/station_name")) {
         StoredStation station;
         for (size_t i = 0; stationMgr.favGet(i, station); ++i) {
@@ -495,6 +505,7 @@ void handleMqttCommand(const String &topic, const String &payload) {
         if (colon > 0) alarmMgr.setTime(payload.substring(0, colon).toInt(), payload.substring(colon + 1).toInt());
     } else if (topic.endsWith("/set/alarm_volume")) {
         alarmMgr.setVolume(payload.toInt());
+        if (alarmPlaybackActive()) setRadioVolume(alarmMgr.getVolume(), false);
     } else if (topic.endsWith("/set/alarm_source")) {
         alarmMgr.setSourceType(payload);
     } else if (topic.endsWith("/set/sd_play")) {
@@ -507,7 +518,7 @@ void handleMqttCommand(const String &topic, const String &payload) {
     } else if (topic.endsWith("/set/announce")) {
         String url = payload;
         int vol = -1;
-        // Optional JSON-Unterstützung: {"url":"http://...","volume":15}
+        // Optional JSON support: {"url":"http://...","volume":15}
         if (payload.startsWith("{") && payload.endsWith("}")) {
             int urlKey = payload.indexOf("\"url\"");
             if (urlKey >= 0) {
@@ -529,7 +540,7 @@ void handleMqttCommand(const String &topic, const String &payload) {
     }
 }
 
-// Webserver Route: Hauptseite
+// Web server route: main page
 void handleRoot() {
     if (wifiMgr.isApMode()) {
         server.send(200, "text/html", SETUP_HTML);
@@ -538,18 +549,18 @@ void handleRoot() {
     }
 }
 
-// Webserver Route: Setup-Seite
+// Web server route: setup page
 void handleSetup() {
     server.send(200, "text/html", SETUP_HTML);
 }
 
-// Webserver Route: MicroSD-Seite
+// Web server route: microSD page
 void handleSdCard() {
     server.send(200, "text/html", SDCARD_HTML);
 }
 
 
-// Webserver Route: Wecker-Seite
+// Web server route: alarm page
 void handleAlarmPage() {
     server.send(200, "text/html", ALARM_HTML);
 }
@@ -645,49 +656,64 @@ void handleWakeWordSelect() {
 void handleAlarmStatus() {
     String json = alarmMgr.getStatusJson();
     json.remove(json.length() - 1);
-    json += ",\"station_count\":" + String(stationMgr.size()) + "}";
-    String alarmLabel = "Radio";
+    json += ",\"station_count\":" + String(stationMgr.size()) + ",\"alarm_playing\":" + (alarmPlaybackActive() ? "true" : "false") + "}";
+    String alarmLabel = STATUS_RADIO;
     if (alarmMgr.getSource() == "sd") {
-        alarmLabel = "SD-Datei: " + alarmMgr.getSdPath();
+        alarmLabel = String(ALARM_LABEL_SD_FILE_PREFIX) + alarmMgr.getSdPath();
     } else {
-        alarmLabel = alarmMgr.getRadioName().isEmpty() ? "Radio: nicht gesetzt" : "Radio: " + alarmMgr.getRadioName();
+        alarmLabel = alarmMgr.getRadioName().isEmpty() ? String(ALARM_LABEL_RADIO_NOT_SET) : String(ALARM_LABEL_RADIO_PREFIX) + alarmMgr.getRadioName();
     }
     json.remove(json.length() - 1);
     json += ",\"alarm_label\":\"" + StationManager::jsonEscape(alarmLabel) + "\"}";
     server.send(200, "application/json", json);
 }
 
-// Hilfsfunktion: Wecker-Wiedergabe auslösen
+// Web server route: alarm status API
 void triggerAlarmPlayback() {
     if (alarmMgr.getSource() == "sd") {
         if (!sdMgr.isMounted() || !sdMgr.exists(alarmMgr.getSdPath())) {
-            Serial.println("[ALARM] Ausgewaehlte SD-Datei nicht verfuegbar.");
+            Serial.println("[ALARM] Selected SD file is not available.");
             return;
         }
         clearSdPlayAll();
         setRadioVolume(alarmMgr.getVolume(), false);
-        currentTitle = "⏰ WECKER AUSGELÖST";
+        currentTitle = STATUS_ALARM_TRIGGERED;
         isPlaying = startSdPath(alarmMgr.getSdPath(), false);
+        alarmPlayback = isPlaying;
         return;
     }
     if (alarmMgr.getRadioUrl().isEmpty()) {
-        Serial.println("[ALARM] Kein Sender gespeichert; Wecker bleibt aus.");
+        Serial.println("[ALARM] No station stored; alarm stays silent.");
         return;
     }
     setRadioVolume(alarmMgr.getVolume(), false);
-    currentTitle = "⏰ WECKER AUSGELÖST";
+    currentTitle = STATUS_ALARM_TRIGGERED;
     isPlaying = true;
     currentStation = alarmMgr.getRadioName();
     currentStreamUrl = alarmMgr.getRadioUrl();
-    Serial.printf("[ALARM] Starte Weck-Wiedergabe: %s (%s) mit Lautstaerke %d\n", 
+    Serial.printf("[ALARM] Starting alarm playback: %s (%s) at volume %d\n", 
                   currentStation.c_str(), currentStreamUrl.c_str(), currentVolume);
     audio.connecttohost(currentStreamUrl.c_str());
+    alarmPlayback = true;
 }
 
-// Webserver Route: Wecker-Einstellungen speichern
+// Stops a running alarm (test) without touching the persisted power state and restores the stored radio volume
+void stopAlarmPlayback() {
+    Serial.println("[ALARM] Stopping alarm playback.");
+    clearSdPlayAll();
+    audio.stopSong();
+    isPlaying = false;
+    alarmPlayback = false;
+    currentTitle = "--";
+    currentBitrate = "--";
+    loadPersistedVolume();
+    audio.setVolume(currentVolume);
+}
+
+// Web server route: save alarm settings
 void handleAlarmSave() {
     if (alarmMgr.getSource() != "sd" && stationMgr.size() == 0) {
-        server.send(409, "text/plain", "Keine M3U-Sender gespeichert");
+        server.send(409, "text/plain", NO_M3U_STATIONS_SAVED);
         return;
     }
     if (server.hasArg("hour") && server.hasArg("minute")) {
@@ -699,34 +725,49 @@ void handleAlarmSave() {
         server.send(200, "text/plain", "OK");
         return;
     }
-    server.send(400, "text/plain", "Ungueltige Parameter");
+    server.send(400, "text/plain", INVALID_PARAMETERS);
 }
 
 void handleRadioAlarmSave() {
     StoredStation station;
     if (!stationMgr.getLastSelected(station)) {
-        server.send(409, "text/plain", "Kein Sender ausgewaehlt");
+        server.send(409, "text/plain", NO_LAST_SELECTED_STATION);
         return;
     }
     alarmMgr.saveRadioSource(station.name, station.url);
     server.send(200, "text/plain", "OK");
 }
 
-// Webserver Route: Wecker jetzt testen
+// Web server route: test alarm now (a second call while the alarm is playing stops it)
 void handleAlarmTest() {
+    if (alarmPlaybackActive()) {
+        stopAlarmPlayback();
+        server.send(200, "text/plain", "OK");
+        return;
+    }
     if (alarmMgr.getSource() == "sd" && (!sdMgr.isMounted() || !sdMgr.exists(alarmMgr.getSdPath()))) {
-        server.send(409, "text/plain", "Ausgewaehlte SD-Datei nicht verfuegbar");
+        server.send(409, "text/plain", ALARM_SD_FILE_NOT_AVAILABLE);
         return;
     }
     if (alarmMgr.getSource() != "sd" && stationMgr.size() == 0) {
-        server.send(409, "text/plain", "Keine M3U-Sender gespeichert");
+        server.send(409, "text/plain", NO_M3U_STATIONS_SAVED);
         return;
     }
     triggerAlarmPlayback();
     server.send(200, "text/plain", "OK");
 }
 
-// Webserver Route: Status API
+// Web server route: live alarm volume preview; applies only while an alarm is playing and is not persisted
+void handleAlarmVolume() {
+    if (!server.hasArg("val")) {
+        server.send(400, "text/plain", INVALID_VALUE);
+        return;
+    }
+    if (alarmPlaybackActive()) setRadioVolume(server.arg("val").toInt(), false);
+    server.send(200, "text/plain", "OK");
+}
+
+// Web server route: status API
 void handleStatus() {
     String json = "{";
     json += "\"playing\":" + String(audio.isRunning() ? "true" : "false") + ",";
@@ -739,7 +780,8 @@ void handleStatus() {
     json += "\"free_heap\":" + String(ESP.getFreeHeap()) + ",";
     json += "\"free_psram\":" + String(ESP.getFreePsram()) + ",";
     json += "\"ap_mode\":" + String(wifiMgr.isApMode() ? "true" : "false") + ",";
-    json += "\"ip\":\"" + (wifiMgr.isApMode() ? WiFi.softAPIP().toString() : WiFi.localIP().toString()) + "\"";
+    json += "\"ip\":\"" + (wifiMgr.isApMode() ? WiFi.softAPIP().toString() : WiFi.localIP().toString()) + "\",";
+    json += "\"ssid\":\"" + StationManager::jsonEscape(!wifiMgr.isApMode() && WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("")) + "\"";
     json += "}";
     server.send(200, "application/json", json);
 }
@@ -798,6 +840,7 @@ void handleTrainingStart() {
         snapshotPlayback(speechPreviousState);
         clearSdPlayAll();
         pendingSdNext = false;
+        alarmPlayback = false;
         if (speechPreviousState.wasPlaying) audio.stopSong();
         isPlaying = false;
         currentStation = "Trainingsaufnahme";
@@ -897,12 +940,12 @@ void handleStationDelete() {
         server.send(200, "text/plain", "OK");
         return;
     }
-    server.send(400, "text/plain", "Ungueltige Sender-ID");
+    server.send(400, "text/plain", INVALID_STATION_ID);
 }
 
 void handleStationsClear() {
     if (!stationMgr.clear()) {
-        server.send(500, "text/plain", "Senderliste konnte nicht geloescht werden");
+        server.send(500, "text/plain", STATION_LIST_CLEAR_FAILED);
         return;
     }
     server.send(200, "text/plain", "OK");
@@ -915,11 +958,11 @@ void handleFavorites() {
 void handleFavoriteAdd() {
     StoredStation station;
     if (!server.hasArg("id") || !stationMgr.get(server.arg("id").toInt(), station)) {
-        server.send(400, "text/plain", "Ungueltige Sender-ID");
+        server.send(400, "text/plain", INVALID_STATION_ID);
         return;
     }
     if (!stationMgr.favAdd(station)) {
-        server.send(409, "text/plain", "Maximal " + String((unsigned)StationManager::MAX_FAVORITES) + " Favoriten");
+        server.send(409, "text/plain", String(FAVORITES_LIMIT_PREFIX) + String((unsigned)StationManager::MAX_FAVORITES) + FAVORITES_LIMIT_SUFFIX);
         return;
     }
     mqttMgr.refreshDiscovery();
@@ -928,7 +971,7 @@ void handleFavoriteAdd() {
 
 void handleFavoriteRemove() {
     if (!server.hasArg("idx") || !stationMgr.favRemove(server.arg("idx").toInt())) {
-        server.send(400, "text/plain", "Ungueltiger Favorit");
+        server.send(400, "text/plain", INVALID_FAVORITE);
         return;
     }
     mqttMgr.refreshDiscovery();
@@ -938,7 +981,7 @@ void handleFavoriteRemove() {
 void handleFavoritePlay() {
     StoredStation station;
     if (!server.hasArg("idx") || !stationMgr.favGet(server.arg("idx").toInt(), station)) {
-        server.send(400, "text/plain", "Ungueltiger Favorit");
+        server.send(400, "text/plain", INVALID_FAVORITE);
         return;
     }
     playStoredStation(station);
@@ -964,12 +1007,12 @@ bool sdFileProtected(const String &path) {
 void handleSdDownload() {
     const String path = server.arg("path");
     if (!sdMgr.isMounted() || !SdManager::isUserAudioPath(path)) {
-        server.send(400, "text/plain", "Ungueltiger Audiopfad oder keine SD-Karte");
+        server.send(400, "text/plain", INVALID_AUDIO_PATH_OR_NO_SD);
         return;
     }
     File file = sdMgr.filesystem().open(path, "r");
     if (!file || file.isDirectory()) {
-        server.send(404, "text/plain", "Datei nicht gefunden");
+        server.send(404, "text/plain", FILE_NOT_FOUND);
         return;
     }
     server.sendHeader("Content-Disposition", "attachment; filename=\"" + path.substring(path.lastIndexOf('/') + 1) + "\"");
@@ -980,22 +1023,22 @@ void handleSdDownload() {
 void handleSdDelete() {
     const String path = server.arg("path");
     if (!sdMgr.isMounted() || !SdManager::isUserAudioPath(path)) {
-        server.send(400, "text/plain", "Ungueltiger Audiopfad oder keine SD-Karte");
+        server.send(400, "text/plain", INVALID_AUDIO_PATH_OR_NO_SD);
         return;
     }
     if (sdFileProtected(path)) {
-        server.send(409, "text/plain", "Datei wird abgespielt oder ist als Weckton ausgewaehlt");
+        server.send(409, "text/plain", SD_FILE_IN_USE);
         return;
     }
     File file = sdMgr.filesystem().open(path, "r");
     if (!file || file.isDirectory()) {
-        server.send(404, "text/plain", "Datei nicht gefunden");
+        server.send(404, "text/plain", FILE_NOT_FOUND);
         return;
     }
     file.close();
     const bool removed = sdMgr.filesystem().remove(path);
     if (removed) mqttMgr.refreshDiscovery();
-    server.send(removed ? 200 : 500, "text/plain", removed ? "OK" : "Loeschen fehlgeschlagen");
+    server.send(removed ? 200 : 500, "text/plain", removed ? "OK" : SD_FILE_DELETE_FAILED);
 }
 
 File sdAudioUpload;
@@ -1017,47 +1060,47 @@ void handleSdAudioUpload() {
     HTTPUpload &upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
         if (!sdAudioUploadPath.isEmpty() || !sdAudioUploadError.isEmpty()) {
-            abortSdAudioUpload("Nur eine Datei pro Upload erlaubt");
+            abortSdAudioUpload(SD_UPLOAD_ONE_FILE_ONLY);
             return;
         }
         sdAudioUploadBytes = 0;
         sdAudioUploadComplete = false;
-        if (!sdMgr.isMounted() || speechCaptureActive || trainingRecorder.state() != TrainingRecorder::State::Idle) {
-            abortSdAudioUpload("Keine SD-Karte oder Aufnahme aktiv");
+        if (!sdMgr.isMounted()) {
+            abortSdAudioUpload(NO_SD_CARD);
             return;
         }
         const String name = upload.filename;
         if (name.isEmpty() || name.length() > 100 || name.startsWith(".") || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0 ||
             !SdManager::isUserAudioPath("/alarm/" + name)) {
-            abortSdAudioUpload("Ungueltiger Dateiname (MP3, WAV, AAC oder FLAC erforderlich)");
+            abortSdAudioUpload(SD_FILE_INVALID);
             return;
         }
         sdAudioUploadPath = "/alarm/" + name;
         if (sdMgr.exists(sdAudioUploadPath)) {
-            abortSdAudioUpload("Datei existiert bereits; bitte anderen Namen verwenden");
+            abortSdAudioUpload(SD_FILE_ALREADY_EXISTS);
             return;
         }
         if (!sdMgr.filesystem().exists("/alarm") && !sdMgr.filesystem().mkdir("/alarm")) {
-            abortSdAudioUpload("Ordner /alarm konnte nicht angelegt werden");
+            abortSdAudioUpload(SD_ALARM_DIR_CREATE_FAILED);
             return;
         }
         sdMgr.filesystem().remove(SD_AUDIO_TEMP);
         sdAudioUpload = sdMgr.filesystem().open(SD_AUDIO_TEMP, "w");
-        if (!sdAudioUpload) abortSdAudioUpload("Upload-Datei konnte nicht erstellt werden");
+        if (!sdAudioUpload) abortSdAudioUpload(SD_UPLOAD_TEMP_CREATE_FAILED);
     } else if (upload.status == UPLOAD_FILE_WRITE && sdAudioUploadError.isEmpty()) {
         if (upload.currentSize > SD_AUDIO_MAX_BYTES - sdAudioUploadBytes) {
-            abortSdAudioUpload("Datei zu gross (max. 20 MB)");
+            abortSdAudioUpload(SD_FILE_TOO_LARGE);
         } else if (!sdAudioUpload || sdAudioUpload.write(upload.buf, upload.currentSize) != upload.currentSize) {
-            abortSdAudioUpload("Schreiben fehlgeschlagen (SD voll?)");
+            abortSdAudioUpload(SD_FILE_WRITE_FAILED);
         } else {
             sdAudioUploadBytes += upload.currentSize;
         }
     } else if (upload.status == UPLOAD_FILE_END && sdAudioUploadError.isEmpty()) {
         if (sdAudioUpload) sdAudioUpload.close();
-        if (!sdAudioUploadBytes || sdAudioUploadBytes != upload.totalSize) abortSdAudioUpload("Upload unvollstaendig oder leer");
+        if (!sdAudioUploadBytes || sdAudioUploadBytes != upload.totalSize) abortSdAudioUpload(SD_FILE_UPLOAD_INCOMPLETE);
         else sdAudioUploadComplete = true;
     } else if (upload.status == UPLOAD_FILE_ABORTED) {
-        abortSdAudioUpload("Upload abgebrochen");
+        abortSdAudioUpload(SD_FILE_UPLOAD_ABORTED);
         sdAudioUploadPath = "";
         sdAudioUploadError = "";
     }
@@ -1066,13 +1109,13 @@ void handleSdAudioUpload() {
 void handleSdAudioUploadResult() {
     if (sdAudioUploadComplete && sdAudioUploadError.isEmpty()) {
         if (sdMgr.exists(sdAudioUploadPath) || !sdMgr.filesystem().rename(SD_AUDIO_TEMP, sdAudioUploadPath)) {
-            abortSdAudioUpload("Datei konnte nicht gespeichert werden");
+            abortSdAudioUpload(SD_FILE_SAVE_FAILED);
         }
     } else if (sdAudioUploadError.isEmpty()) {
-        abortSdAudioUpload("Keine vollstaendige Datei empfangen");
+        abortSdAudioUpload(SD_UPLOAD_NO_COMPLETE_FILE);
     }
     const bool success = sdAudioUploadComplete && sdAudioUploadError.isEmpty();
-    server.send(success ? 200 : 400, "text/plain", success ? "Gespeichert: " + sdAudioUploadPath : sdAudioUploadError);
+    server.send(success ? 200 : 400, "text/plain", success ? String(SD_FILE_SAVED_PREFIX) + sdAudioUploadPath : sdAudioUploadError);
     sdAudioUploadPath = "";
     sdAudioUploadError = "";
     sdAudioUploadComplete = false;
@@ -1081,23 +1124,23 @@ void handleSdAudioUploadResult() {
 
 void handleSdPlay() {
     if (!server.hasArg("path") || !sdMgr.exists(server.arg("path"))) {
-        server.send(404, "text/plain", "SD-Datei nicht gefunden");
+        server.send(404, "text/plain", SD_FILE_NOT_FOUND);
         return;
     }
     clearSdPlayAll();
     String path = server.arg("path");
     isPlaying = startSdPath(path);
-    server.send(isPlaying ? 200 : 500, "text/plain", isPlaying ? "OK" : "Wiedergabe fehlgeschlagen");
+    server.send(isPlaying ? 200 : 500, "text/plain", isPlaying ? "OK" : SD_PLAYBACK_FAILED);
 }
 
 void handleSdAlarm() {
     if (!server.hasArg("path") || !sdMgr.isMounted()) {
-        server.send(409, "text/plain", "SD-Karte nicht verfuegbar");
+        server.send(409, "text/plain", SD_NOT_AVAILABLE);
         return;
     }
     String path = server.arg("path");
     if (!sdMgr.exists(path)) {
-        server.send(404, "text/plain", "SD-Datei nicht gefunden");
+        server.send(404, "text/plain", SD_FILE_NOT_FOUND);
         return;
     }
     alarmMgr.saveSource("sd", path);
@@ -1106,19 +1149,19 @@ void handleSdAlarm() {
 
 void handleSdPlayAll() {
     if (!sdMgr.isMounted()) {
-        server.send(409, "text/plain", "SD-Karte nicht verfuegbar");
+        server.send(409, "text/plain", SD_NOT_AVAILABLE);
         return;
     }
     sdPlayAllPaths = sdMgr.paths();
     if (sdPlayAllPaths.empty()) {
         clearSdPlayAll();
-        server.send(404, "text/plain", "Keine abspielbaren SD-Dateien");
+        server.send(404, "text/plain", NO_PLAYABLE_SD_FILES);
         return;
     }
     sdPlayAllIndex = 0;
     sdPlayAllActive = true;
     isPlaying = startSdPath(sdPlayAllPaths[sdPlayAllIndex]);
-    server.send(isPlaying ? 200 : 500, "text/plain", isPlaying ? "OK" : "Wiedergabe fehlgeschlagen");
+    server.send(isPlaying ? 200 : 500, "text/plain", isPlaying ? "OK" : SD_PLAYBACK_FAILED);
 }
 
 void handleSdStopAll() {
@@ -1138,12 +1181,12 @@ String m3uResultJson(size_t imported) {
            ",\"storage\":\"" + (stationMgr.usesSd() ? "sd" : "nvs") + "\"}";
 }
 
-// Modus per URL-Parameter (?mode=replace|append), da Formularfelder beim Upload-Start noch nicht geparst sind
+// Mode via URL parameter (?mode=replace|append), because form fields are not parsed yet when the upload starts
 void handleM3uImport() {
     if (m3uUploadDone) {
         m3uUploadDone = false;
         if (!m3uUploadOk) {
-            server.send(500, "text/plain", "Senderliste konnte nicht geschrieben werden");
+            server.send(500, "text/plain", STATION_LIST_WRITE_FAILED);
             return;
         }
         server.send(200, "application/json", m3uResultJson(m3uImportedCount));
@@ -1151,11 +1194,11 @@ void handleM3uImport() {
     }
     String body = server.arg("plain");
     if (body.isEmpty()) {
-        server.send(400, "text/plain", "M3U body missing");
+        server.send(400, "text/plain", M3U_BODY_MISSING);
         return;
     }
     if (!stationMgr.beginImport(server.arg("mode") == "replace")) {
-        server.send(500, "text/plain", "Senderliste konnte nicht geschrieben werden");
+        server.send(500, "text/plain", STATION_LIST_WRITE_FAILED);
         return;
     }
     stationMgr.feed((const uint8_t *)body.c_str(), body.length());
@@ -1179,7 +1222,7 @@ void handleM3uUpload() {
     }
 }
 
-// Webserver Route: Sender aus der Liste abspielen
+// Web server route: play a station from the list
 void handleStation() {
     if (server.hasArg("id")) {
         StoredStation station;
@@ -1189,28 +1232,29 @@ void handleStation() {
             return;
         }
     }
-    server.send(400, "text/plain", "Ungueltige Sender-ID");
+    server.send(400, "text/plain", INVALID_STATION_ID);
 }
 
-// Webserver Route: Eigene URL abspielen
+// Web server route: play a custom URL
 void handlePlay() {
     if (server.hasArg("url")) {
         clearSdPlayAll();
+        alarmPlayback = false;
         currentStreamUrl = server.arg("url");
-        currentStation = "Custom Stream";
-        currentTitle = "Verbinde...";
+        currentStation = STATUS_CUSTOM_STREAM;
+        currentTitle = STATUS_CONNECTING;
         currentBitrate = "--";
         isPlaying = true;
         savePersistedRadioPower(true);
-        Serial.printf("[RADIO] Starte Custom URL: %s\n", currentStreamUrl.c_str());
+        Serial.printf("[RADIO] Starting custom URL: %s\n", currentStreamUrl.c_str());
         audio.connecttohost(currentStreamUrl.c_str());
         server.send(200, "text/plain", "OK");
         return;
     }
-    server.send(400, "text/plain", "Keine URL angegeben");
+    server.send(400, "text/plain", NO_URL_GIVEN);
 }
 
-// Webserver Route: Durchsage / TTS mit automatischem Resume
+// Web server route: announcement / TTS with automatic resume
 void handleAnnounce() {
     if (server.hasArg("url")) {
         int vol = server.hasArg("volume") ? server.arg("volume").toInt() : (server.hasArg("vol") ? server.arg("vol").toInt() : -1);
@@ -1218,17 +1262,17 @@ void handleAnnounce() {
         server.send(200, "text/plain", "OK");
         return;
     }
-    server.send(400, "text/plain", "Keine Durchsage-URL angegeben");
+    server.send(400, "text/plain", NO_ANNOUNCE_URL_GIVEN);
 }
 
-// Webserver Route: Durchsage-Lautstärke einstellen
+// Web server route: set announcement volume
 void handleAnnounceVolume() {
     if (server.hasArg("val")) {
         setAnnounceVolume(server.arg("val").toInt());
         server.send(200, "text/plain", "OK");
         return;
     }
-    server.send(400, "text/plain", "Ungueltiger Wert");
+    server.send(400, "text/plain", INVALID_VALUE);
 }
 
 void stopPlayback() {
@@ -1236,6 +1280,7 @@ void stopPlayback() {
     clearSdPlayAll();
     wakeAckTonePlaying = false;
     pendingWakeAckDone = false;
+    alarmPlayback = false;
     audio.stopSong();
     isPlaying = false;
     savePersistedRadioPower(false);
@@ -1243,7 +1288,7 @@ void stopPlayback() {
     currentBitrate = "--";
 }
 
-// Webserver Route: Stop
+// Web server route: stop
 void handleStop() {
     stopPlayback();
     server.send(200, "text/plain", "OK");
@@ -1253,30 +1298,30 @@ void handleResume() {
     if (currentStreamUrl.startsWith("http://") || currentStreamUrl.startsWith("https://")) {
         startStream(currentStation, currentStreamUrl);
     } else if (!startLastOrFirst()) {
-        server.send(409, "text/plain", "Kein Sender zum Fortsetzen gespeichert");
+        server.send(409, "text/plain", NO_STATION_TO_RESUME);
         return;
     }
     server.send(200, "text/plain", "OK");
 }
 
-// Webserver Route: Lautstärke
+// Web server route: volume
 void handleVolume() {
     if (server.hasArg("val")) {
         int val = server.arg("val").toInt();
         setRadioVolume(val);
-        Serial.printf("[RADIO] Lautstaerke gesetzt auf: %d\n", currentVolume);
+        Serial.printf("[RADIO] Volume set to: %d\n", currentVolume);
         server.send(200, "text/plain", "OK");
         return;
     }
-    server.send(400, "text/plain", "Ungueltiger Wert");
+    server.send(400, "text/plain", INVALID_VALUE);
 }
 
-// Webserver Route: WLAN Netzwerke scannen
+// Web server route: scan Wi-Fi networks
 void handleWifiScan() {
     server.send(200, "application/json", wifiMgr.scanNetworksJson());
 }
 
-// Webserver Route: WLAN Zugangsdaten speichern
+// Web server route: save Wi-Fi credentials
 void handleWifiSave() {
     if (server.hasArg("ssid")) {
         String ssid = server.arg("ssid");
@@ -1287,10 +1332,10 @@ void handleWifiSave() {
         rebootTimer = millis();
         return;
     }
-    server.send(400, "text/plain", "Fehlende Parameter");
+    server.send(400, "text/plain", MISSING_PARAMETERS);
 }
 
-// Webserver Route: WLAN Zugangsdaten löschen
+// Web server route: delete Wi-Fi credentials
 void handleWifiReset() {
     wifiMgr.clearCredentials();
     server.send(200, "text/plain", "OK");
@@ -1329,6 +1374,11 @@ void handleMqttStatus() {
 }
 
 void setup() {
+    // Without a connected terminal the native USB serial keeps only 256 bytes; a larger buffer preserves the
+    // boot log until the monitor reconnects after the reset (must be called before begin())
+#if ARDUINO_USB_CDC_ON_BOOT
+    Serial.setTxBufferSize(8192);
+#endif
     Serial.begin(115200);
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, LOW); // Initialzustand der LED auf AUS setzen
@@ -1343,37 +1393,37 @@ void setup() {
     Serial.println("  ESP32-S3 Internet Radio & MAX98357A");
     Serial.println("==========================================");
 
-    // PSRAM Überprüfung
+    // PSRAM check
     if (psramFound()) {
-        Serial.printf("[SYS] PSRAM gefunden! Gesamt: %d KB, Frei: %d KB\n", 
+        Serial.printf("[SYS] PSRAM found! Total: %d KB, free: %d KB\n", 
             ESP.getPsramSize() / 1024, ESP.getFreePsram() / 1024);
     } else {
-        Serial.println("[SYS] WARNUNG: Kein PSRAM gefunden oder nicht aktiviert!");
+        Serial.println("[SYS] WARNING: No PSRAM found or PSRAM not enabled!");
     }
-    Serial.printf("[SYS] Heap frei: %d KB\n", ESP.getFreeHeap() / 1024);
+    Serial.printf("[SYS] Free heap: %d KB\n", ESP.getFreeHeap() / 1024);
 
-    // I2S Audio Konfiguration
+    // I2S audio configuration
     Serial.printf("[I2S] Pins: BCLK=%d, LRC=%d, DOUT=%d\n", I2S_BCLK, I2S_LRC, I2S_DOUT);
     audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
     loadPersistedVolume();
     audio.setVolume(currentVolume);
-    Serial.printf("[AUDIO] Gespeicherte Lautstaerke: %d\n", currentVolume);
+    Serial.printf("[AUDIO] Stored volume: %d\n", currentVolume);
 
-    // WLAN Initialisierung (NVS -> STA -> AP Fallback)
+    // Wi-Fi initialization (NVS -> STA -> AP fallback)
     sdMgr.begin();
     wifiMgr.initWifi(sdMgr.isMounted() ? &sdMgr.filesystem() : nullptr);
     stationMgr.begin(sdMgr.isMounted() ? &sdMgr.filesystem() : nullptr);
     wakeWordMgr.begin(sdMgr.isMounted() ? &sdMgr.filesystem() : nullptr);
-    Serial.printf("[RADIO] %u Sender (%s), %u Favoriten\n", (unsigned)stationMgr.size(),
+    Serial.printf("[RADIO] %u stations (%s), %u favorites\n", (unsigned)stationMgr.size(),
                   stationMgr.usesSd() ? "SD" : "NVS", (unsigned)stationMgr.favSize());
     mqttMgr.setStationListProvider(buildStationOptionsJson);
     mqttMgr.setSdListProvider(buildSdOptionsJson);
     mqttMgr.begin(handleMqttCommand);
 
-    // Wecker Manager & NTP Zeit-Sync starten
+    // Start alarm manager and NTP time sync
     alarmMgr.begin();
 
-    // Webserver Endpunkte registrieren
+    // Register web server endpoints
     server.on("/", HTTP_GET, handleRoot);
     server.on("/setup", HTTP_GET, handleSetup);
     server.on("/alarm", HTTP_GET, handleAlarmPage);
@@ -1429,15 +1479,16 @@ void setup() {
     server.on("/api/alarm/save", HTTP_POST, handleAlarmSave);
     server.on("/api/alarm/radio", HTTP_POST, handleRadioAlarmSave);
     server.on("/api/alarm/test", HTTP_POST, handleAlarmTest);
-    server.onNotFound([]() { server.send(404, "text/plain", "Not found"); });
+    server.on("/api/alarm/volume", HTTP_POST, handleAlarmVolume);
+    server.onNotFound([]() { server.send(404, "text/plain", NOT_FOUND); });
     server.begin();
-    Serial.println("[HTTP] Webserver gestartet auf Port 80.");
+    Serial.println("[HTTP] Web server started on port 80.");
 
-    // Autostart des Radiosenders nur im STA Modus
+    // Auto-start the radio station in STA mode only
     if (radioPowerOn && !wifiMgr.isApMode() && WiFi.status() == WL_CONNECTED) {
         delay(1000);
         if (startLastOrFirst()) {
-            Serial.printf("[RADIO] Autostart: %s\n", currentStation.c_str());
+            Serial.printf("[RADIO] Auto-start: %s\n", currentStation.c_str());
         }
     }
 
@@ -1465,7 +1516,7 @@ void loop() {
         unsigned long now = millis();
         if (audio.isRunning()) announceLastActiveMs = now;
         if (now - announceLastActiveMs > ANNOUNCE_IDLE_TIMEOUT_MS || now - announceStartMs > ANNOUNCE_MAX_MS) {
-            Serial.println("[ANNOUNCE] Timeout erreicht, kehre zum vorherigen Zustand zurück.");
+            Serial.println("[ANNOUNCE] Timeout reached, returning to previous state.");
             resumeAfterAnnouncement();
         }
     }
@@ -1475,7 +1526,7 @@ void loop() {
         lastMqttState = millis();
         mqttMgr.publishState(audio.isRunning(), currentStation, currentTitle, currentVolume, currentAnnounceVolume, isAnnouncing);
         mqttMgr.publishAlarmState(alarmMgr.isEnabled(), alarmMgr.getHour(), alarmMgr.getMinute(), alarmMgr.getVolume(), alarmMgr.getSource(), alarmMgr.getSdPath());
-        mqttMgr.publish("state/sd_current", currentStation.startsWith("SD: ") ? currentStreamUrl : "");
+        mqttMgr.publish("state/sd_current", currentStation.startsWith(SD_STATION_PREFIX) ? currentStreamUrl : "");
     }
 
     if (alarmMgr.checkAlarmTrigger()) {
@@ -1483,13 +1534,13 @@ void loop() {
     }
 
     if (shouldReboot && (millis() - rebootTimer > 1500)) {
-        Serial.println("[SYS] Starte System neu...");
+        Serial.println("[SYS] Restarting system...");
         ESP.restart();
     }
 }
 
 // ==========================================
-// Audio Callbacks für Metadaten & Status
+// Audio callbacks for metadata and status
 // ==========================================
 void audio_info(const char *info) {
     Serial.print("[AUDIO INFO] ");

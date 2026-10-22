@@ -1,12 +1,13 @@
 #pragma once
 #include <Arduino.h>
+#include "language.h"
 
 // ==========================================
-// 1. Radio Web-Oberfläche (Hauptseite)
+// 1. Radio web interface (main page)
 // ==========================================
 const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html lang="de">
+<html lang=")rawliteral" T_HTML_LANG R"rawliteral(">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -108,9 +109,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <div class="header-row">
         <h1>📻 ESP32 Radio</h1>
         <div class="header-actions">
-          <label class="options-toggle"><input type="checkbox" id="optionsToggle"> Optionen</label>
-          <a href="/alarm" class="btn-settings">⏰ Wecker</a>
-          <a href="/setup" class="btn-settings">⚙️ WLAN</a>
+          <label class="options-toggle"><input type="checkbox" id="optionsToggle"> )rawliteral" T_IDX_OPTIONS R"rawliteral(</label>
+          <a href="/alarm" class="btn-settings">)rawliteral" T_IDX_NAV_ALARM R"rawliteral(</a>
+          <a href="/setup" class="btn-settings">)rawliteral" T_IDX_NAV_WIFI R"rawliteral(</a>
           <a href="/sdcard" class="btn-settings">💾 MicroSD</a>
           <a href="/wakeword" class="btn-settings">🎙️ Wake Word</a>
         </div>
@@ -120,12 +121,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <div class="now-playing">
         <div id="statusBadge" class="status-badge">
           <div class="status-dot"></div>
-          <span id="statusText">Gestoppt</span>
+          <span id="statusText">)rawliteral" T_IDX_STOPPED R"rawliteral(</span>
         </div>
-        <div class="station-name" id="stationName">Lade...</div>
+        <div class="station-name" id="stationName">)rawliteral" T_LOADING R"rawliteral(</div>
         <div class="track-title" id="trackTitle">--</div>
         <div class="meta-tags">
-          <div class="tag">Bitrate: <span id="bitrate">--</span></div>
+          <div class="tag">)rawliteral" T_IDX_BITRATE_LABEL R"rawliteral(<span id="bitrate">--</span></div>
           <div class="tag">I2S: BCLK=9, LRC=7, DIN=8</div>
         </div>
       </div>
@@ -134,27 +135,27 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <div class="card controls">
       <div class="volume-box">
         <div class="volume-label">
-          <span>Lautstärke</span>
+          <span>)rawliteral" T_IDX_VOLUME R"rawliteral(</span>
           <span id="volVal">12 / 21</span>
         </div>
         <input type="range" id="volSlider" min="0" max="21" value="12" oninput="setVolume(this.value)">
       </div>
       <div class="btn-row">
-        <button class="btn-danger" id="playbackToggle" onclick="togglePlayback()">⏹ Stop</button>
+        <button class="btn-danger" id="playbackToggle" onclick="togglePlayback()">)rawliteral" T_IDX_STOP_BUTTON R"rawliteral(</button>
       </div>
     </div>
 
     <div class="card">
       <div class="header-row" style="margin-bottom: 0.75rem;">
-        <h3 style="font-size: 1rem; color: var(--accent);">Favoriten</h3>
-        <label class="options-toggle"><input type="checkbox" id="showAllStations" aria-controls="stationBrowser"> Alle Sender anzeigen</label>
+        <h3 style="font-size: 1rem; color: var(--accent);">)rawliteral" T_IDX_FAVORITES_HEADING R"rawliteral(</h3>
+        <label class="options-toggle"><input type="checkbox" id="showAllStations" aria-controls="stationBrowser"> )rawliteral" T_IDX_SHOW_ALL R"rawliteral(</label>
       </div>
       <div class="station-grid" id="presetList"></div>
-      <button type="button" class="btn-primary alarm-station-button" id="saveRadioAlarm">⏰ Als Weckton speichern</button>
+      <button type="button" class="btn-primary alarm-station-button" id="saveRadioAlarm">)rawliteral" T_IDX_SAVE_AS_ALARM R"rawliteral(</button>
 
       <div id="stationBrowser" hidden>
-      <h3 style="font-size: 0.9rem; margin-top: 1rem; margin-bottom: 0.4rem; color: var(--text-muted);">Senderliste</h3>
-      <input type="search" id="stationSearch" class="station-search" placeholder="Sender suchen...">
+      <h3 style="font-size: 0.9rem; margin-top: 1rem; margin-bottom: 0.4rem; color: var(--text-muted);">)rawliteral" T_IDX_STATION_LIST_HEADING R"rawliteral(</h3>
+      <input type="search" id="stationSearch" class="station-search" placeholder=")rawliteral" T_IDX_SEARCH_PLACEHOLDER R"rawliteral(">
       <div id="stationList"></div>
       <div class="pager">
         <button type="button" id="stationPrev">◀</button>
@@ -164,10 +165,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       </div>
       <div id="stationMsg" class="hint" style="margin-top: 0.5rem;"></div>
 
-      <h3 style="font-size: 0.9rem; margin-top: 1rem; margin-bottom: 0.4rem; color: var(--text-muted);">Eigene Stream-URL</h3>
+      <h3 style="font-size: 0.9rem; margin-top: 1rem; margin-bottom: 0.4rem; color: var(--text-muted);">)rawliteral" T_IDX_CUSTOM_URL_HEADING R"rawliteral(</h3>
       <div class="custom-url-box">
         <input type="text" id="customUrl" placeholder="http://.../stream.mp3">
-        <button class="btn-primary" onclick="playCustomUrl()">Play</button>
+        <button class="btn-primary" onclick="playCustomUrl()">)rawliteral" T_IDX_CUSTOM_PLAY R"rawliteral(</button>
       </div>
     </div>
 
@@ -194,22 +195,22 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <div class="card advanced-card" id="advancedCard">
       <div class="volume-box">
         <div class="volume-label">
-          <span>📢 Durchsage-Lautstärke (TTS)</span>
+          <span>)rawliteral" T_IDX_ANNOUNCE_VOLUME R"rawliteral(</span>
           <span id="annVolVal">14 / 21</span>
         </div>
         <input type="range" id="annVolSlider" min="0" max="21" value="14" oninput="setAnnounceVolume(this.value)">
       </div>
-      <h3 style="font-size: 0.9rem; margin-top: 1rem; margin-bottom: 0.4rem; color: var(--text-muted);">M3U-Senderliste</h3>
+      <h3 style="font-size: 0.9rem; margin-top: 1rem; margin-bottom: 0.4rem; color: var(--text-muted);">)rawliteral" T_IDX_M3U_HEADING R"rawliteral(</h3>
       <form id="m3uForm" enctype="multipart/form-data">
         <input type="file" id="m3uFile" name="file" accept=".m3u,.m3u8,.txt" style="width: 100%; color: var(--text-muted); margin-bottom: 0.5rem;">
         <select id="m3uMode" style="width: 100%; margin-bottom: 0.5rem;">
-          <option value="append">An bestehende Liste anhängen</option>
-          <option value="replace">Bestehende Liste ersetzen</option>
+          <option value="append">)rawliteral" T_IDX_M3U_APPEND R"rawliteral(</option>
+          <option value="replace">)rawliteral" T_IDX_M3U_REPLACE R"rawliteral(</option>
         </select>
-        <button type="submit" class="btn-primary">📂 M3U hochladen</button>
+        <button type="submit" class="btn-primary">)rawliteral" T_IDX_M3U_UPLOAD R"rawliteral(</button>
       </form>
       <div id="m3uMsg" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;"></div>
-      <button type="button" class="btn-danger" id="clearStations" style="width: 100%; margin-top: 0.75rem;">🗑️ Alle Sender löschen</button>
+      <button type="button" class="btn-danger" id="clearStations" style="width: 100%; margin-top: 0.75rem;">)rawliteral" T_IDX_CLEAR_ALL R"rawliteral(</button>
     </div>
 
     <div class="system-info">
@@ -251,7 +252,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           if (!favorites.length) {
             const hint = document.createElement('div');
             hint.className = 'hint';
-            hint.innerText = 'Noch keine Favoriten – in der Senderliste mit ☆ markieren.';
+            hint.innerText = ')rawliteral" T_IDX_NO_FAVORITES R"rawliteral(';
             list.appendChild(hint);
           }
           favorites.forEach(f => {
@@ -271,14 +272,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     function loadStations() {
       if (stationBrowser.hidden) return;
       const params = new URLSearchParams({ offset: stationOffset, limit: STATION_PAGE_SIZE, q: stationQuery });
-      document.getElementById('stationPageInfo').innerText = 'Lade...';
+      document.getElementById('stationPageInfo').innerText = ')rawliteral" T_LOADING R"rawliteral(';
       fetch('/api/stations?' + params)
         .then(res => res.json())
         .then(data => {
           stationPage = data;
           renderStationPage();
         })
-        .catch(() => { document.getElementById('stationPageInfo').innerText = 'Fehler beim Laden'; });
+        .catch(() => { document.getElementById('stationPageInfo').innerText = ')rawliteral" T_IDX_LOAD_ERROR R"rawliteral('; });
     }
 
     function renderStationPage() {
@@ -289,7 +290,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       if (!stations.length) {
         const hint = document.createElement('div');
         hint.className = 'hint';
-        hint.innerText = stationQuery ? 'Keine Treffer.' : 'Keine Sender gespeichert – M3U-Liste unter "Optionen" hochladen.';
+        hint.innerText = stationQuery ? ')rawliteral" T_IDX_NO_MATCHES R"rawliteral(' : ')rawliteral" T_IDX_NO_STATIONS_PREFIX R"rawliteral(' + '"' + ')rawliteral" T_IDX_OPTIONS R"rawliteral(' + '"' + ')rawliteral" T_IDX_NO_STATIONS_SUFFIX R"rawliteral(';
         box.appendChild(hint);
       }
       stations.forEach(s => {
@@ -302,15 +303,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         const fav = favorites.find(f => f.url === s.url);
         const play = document.createElement('button');
         play.innerText = '▶';
-        play.title = 'Abspielen';
+        play.title = ')rawliteral" T_IDX_PLAY_TITLE R"rawliteral(';
         play.onclick = () => playPreset(s.id);
         const star = document.createElement('button');
         star.innerText = fav ? '★' : '☆';
-        star.title = fav ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen';
+        star.title = fav ? ')rawliteral" T_IDX_FAV_REMOVE R"rawliteral(' : ')rawliteral" T_IDX_FAV_ADD R"rawliteral(';
         star.onclick = () => toggleFavorite(s, fav);
         const del = document.createElement('button');
         del.innerText = '🗑';
-        del.title = 'Löschen';
+        del.title = ')rawliteral" T_IDX_DELETE_TITLE R"rawliteral(';
         del.onclick = () => deleteStation(s);
         row.append(name, play, star, del);
         box.appendChild(row);
@@ -318,8 +319,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       const total = stationPage.total || 0;
       const from = total ? stationOffset + 1 : 0;
       const to = Math.min(stationOffset + STATION_PAGE_SIZE, total);
-      let info = from + '–' + to + ' von ' + total;
-      if (stationPage.storage === 'nvs') info += ' (ohne SD-Karte max. 24)';
+      let info = from + '–' + to + ')rawliteral" T_IDX_PAGE_OF R"rawliteral(' + total;
+      if (stationPage.storage === 'nvs') info += ')rawliteral" T_IDX_NO_SD_LIMIT_SHORT R"rawliteral(';
       document.getElementById('stationPageInfo').innerText = info;
       document.getElementById('stationPrev').disabled = stationOffset === 0;
       document.getElementById('stationNext').disabled = stationOffset + STATION_PAGE_SIZE >= total;
@@ -330,27 +331,27 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       const request = fav ? postForm('/api/favorites/remove', { idx: fav.idx }) : postForm('/api/favorites/add', { id: station.id });
       request
         .then(() => { msg.innerText = ''; return loadFavorites(); })
-        .catch(error => { msg.innerText = 'Favorit konnte nicht geändert werden: ' + error; });
+        .catch(error => { msg.innerText = ')rawliteral" T_IDX_FAV_CHANGE_FAILED R"rawliteral(' + error; });
     }
 
     function deleteStation(station) {
-      if (!confirm('Sender "' + station.name + '" löschen?')) return;
+      if (!confirm(')rawliteral" T_IDX_DELETE_CONFIRM_PREFIX R"rawliteral(' + '"' + station.name + '"' + ')rawliteral" T_IDX_DELETE_CONFIRM_SUFFIX R"rawliteral(')) return;
       const msg = document.getElementById('stationMsg');
       postForm('/api/stations/delete', { id: station.id })
-        .then(() => { msg.innerText = 'Sender gelöscht.'; loadStations(); })
-        .catch(error => { msg.innerText = 'Löschen fehlgeschlagen: ' + error; });
+        .then(() => { msg.innerText = ')rawliteral" T_IDX_STATION_DELETED R"rawliteral('; loadStations(); })
+        .catch(error => { msg.innerText = ')rawliteral" T_IDX_DELETE_FAILED R"rawliteral(' + error; });
     }
 
     document.getElementById('clearStations').addEventListener('click', () => {
-      if (!confirm('Wirklich ALLE Sender löschen? Favoriten bleiben erhalten.')) return;
+      if (!confirm(')rawliteral" T_IDX_CLEAR_CONFIRM R"rawliteral(')) return;
       const msg = document.getElementById('m3uMsg');
       postForm('/api/stations/clear', {})
         .then(() => {
-          msg.innerText = 'Alle Sender gelöscht.';
+          msg.innerText = ')rawliteral" T_IDX_CLEARED R"rawliteral(';
           stationOffset = 0;
           loadStations();
         })
-        .catch(error => { msg.innerText = 'Löschen fehlgeschlagen: ' + error; });
+        .catch(error => { msg.innerText = ')rawliteral" T_IDX_DELETE_FAILED R"rawliteral(' + error; });
     });
 
     let searchTimeout;
@@ -520,31 +521,31 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       const file = document.getElementById('m3uFile').files[0];
       const msg = document.getElementById('m3uMsg');
       if (!file) {
-        msg.innerText = 'Bitte zuerst eine M3U-Datei auswählen.';
+        msg.innerText = ')rawliteral" T_IDX_M3U_SELECT_FILE R"rawliteral(';
         return;
       }
-      msg.innerText = 'M3U wird hochgeladen...';
+      msg.innerText = ')rawliteral" T_IDX_M3U_UPLOADING R"rawliteral(';
       const data = new FormData();
       data.append('file', file);
       const mode = document.getElementById('m3uMode').value;
       fetch('/api/stations/m3u?mode=' + encodeURIComponent(mode), { method: 'POST', body: data })
         .then(res => res.ok ? res.json() : res.text().then(text => Promise.reject(text)))
         .then(result => {
-          let text = result.imported + ' Sender importiert, insgesamt ' + result.total + '.';
-          if (result.storage === 'nvs') text += ' Ohne SD-Karte werden max. 24 Sender gespeichert.';
+          let text = ')rawliteral" T_IDX_IMPORTED_PREFIX R"rawliteral(' + result.imported + ')rawliteral" T_IDX_IMPORTED_MID R"rawliteral(' + result.total + ')rawliteral" T_IDX_IMPORTED_SUFFIX R"rawliteral(';
+          if (result.storage === 'nvs') text += ')rawliteral" T_IDX_NVS_LIMIT_NOTE R"rawliteral(';
           msg.innerText = text;
           stationOffset = 0;
           loadStations();
         })
-        .catch(error => { msg.innerText = 'Upload fehlgeschlagen: ' + error; });
+        .catch(error => { msg.innerText = ')rawliteral" T_IDX_UPLOAD_FAILED R"rawliteral(' + error; });
     });
 
     document.getElementById('saveRadioAlarm').addEventListener('click', () => {
       const msg = document.getElementById('stationMsg');
       fetch('/api/alarm/radio', { method: 'POST' })
         .then(res => res.ok ? res.text() : res.text().then(text => Promise.reject(text)))
-        .then(() => { msg.innerText = 'Aktueller Sender ist jetzt der Weckton.'; })
-        .catch(error => { msg.innerText = 'Weckton konnte nicht gespeichert werden: ' + error; });
+        .then(() => { msg.innerText = ')rawliteral" T_IDX_ALARM_STATION_SAVED R"rawliteral('; })
+        .catch(error => { msg.innerText = ')rawliteral" T_IDX_ALARM_STATION_FAILED R"rawliteral(' + error; });
     });
 
     function playPreset(id) {
@@ -601,8 +602,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           radioIsPlaying = data.playing;
           const playbackButton = document.getElementById('playbackToggle');
           playbackButton.className = radioIsPlaying ? 'btn-danger' : 'btn-play';
-          playbackButton.innerText = radioIsPlaying ? '⏹ Stop' : '▶ Play';
-          document.getElementById('stationName').innerText = data.station || 'Unbekannt';
+          playbackButton.innerText = radioIsPlaying ? ')rawliteral" T_IDX_STOP_BUTTON R"rawliteral(' : ')rawliteral" T_IDX_PLAY_BUTTON R"rawliteral(';
+          document.getElementById('stationName').innerText = data.station || ')rawliteral" T_IDX_UNKNOWN R"rawliteral(';
           document.getElementById('trackTitle').innerText = data.title || '--';
           document.getElementById('bitrate').innerText = (data.bitrate && data.bitrate !== "0") ? (Math.round(data.bitrate/1000) + " kbps") : (data.bitrate_raw || "--");
           
@@ -610,13 +611,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           const badgeText = document.getElementById('statusText');
           if (data.announcing) {
             badge.className = 'status-badge live';
-            badgeText.innerText = '📢 Durchsage';
+            badgeText.innerText = ')rawliteral" T_IDX_BADGE_ANNOUNCING R"rawliteral(';
           } else if (data.playing) {
             badge.className = 'status-badge live';
-            badgeText.innerText = 'Wiedergabe';
+            badgeText.innerText = ')rawliteral" T_IDX_BADGE_PLAYING R"rawliteral(';
           } else {
             badge.className = 'status-badge';
-            badgeText.innerText = 'Gestoppt';
+            badgeText.innerText = ')rawliteral" T_IDX_STOPPED R"rawliteral(';
           }
 
           if (document.activeElement !== document.getElementById('volSlider')) {
@@ -646,15 +647,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 // ==========================================
-// 2. WLAN Setup Web-Oberfläche (Konfiguration)
+// 2. Wi-Fi setup web interface (configuration)
 // ==========================================
 const char SETUP_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html lang="de">
+<html lang=")rawliteral" T_HTML_LANG R"rawliteral(">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WLAN Konfiguration - ESP32 Radio</title>
+  <title>)rawliteral" T_SETUP_PAGE_TITLE R"rawliteral(</title>
   <style>
     :root {
       --bg: #0f172a;
@@ -696,101 +697,95 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
     .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; vertical-align: middle; margin-right: 0.4rem; }
     @keyframes spin { to { transform: rotate(360deg); } }
     
-    .nav-link { display: block; text-align: center; margin-top: 1rem; color: var(--text-muted); text-decoration: none; font-size: 0.85rem; }
+    .nav-link { display: block; text-align: center; margin-top: 1rem; color: var(--text-muted); text-decoration: none; font-size: 1.6rem; }
     .nav-link:hover { color: var(--accent); }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="card">
-      <h1>⚙️ WLAN-Einstellungen</h1>
-      <div class="subtitle">Verbinde dein ESP32 Radio mit dem Heimnetz</div>
+      <h1>)rawliteral" T_SETUP_HEADING R"rawliteral(</h1>
+      <div class="subtitle" id="wifiSubtitle">)rawliteral" T_SETUP_SUBTITLE R"rawliteral(</div>
 
       <div class="form-group">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
-          <label for="ssidSelect">Verfügbare Netzwerke (2.4 GHz)</label>
-          <button type="button" class="btn-secondary" onclick="scanWifi()" style="width: auto; padding: 0.3rem 0.6rem; font-size: 0.75rem;">🔄 Scan</button>
+          <label for="ssidSelect">)rawliteral" T_SETUP_NETWORKS_LABEL R"rawliteral(</label>
+          <button type="button" class="btn-secondary" onclick="scanWifi()" style="width: auto; padding: 0.3rem 0.6rem; font-size: 0.75rem;">)rawliteral" T_SETUP_SCAN_BUTTON R"rawliteral(</button>
         </div>
         <select id="ssidSelect" onchange="onSsidSelect()">
-          <option value="">Lade Netzwerke...</option>
+          <option value="">)rawliteral" T_SETUP_SCAN_HINT R"rawliteral(</option>
         </select>
       </div>
 
       <div class="form-group">
-        <label for="manualSsid">Oder SSID manuell eingeben</label>
-        <input type="text" id="manualSsid" placeholder="WLAN-Name (SSID)">
+        <label for="manualSsid">)rawliteral" T_SETUP_MANUAL_SSID_LABEL R"rawliteral(</label>
+        <input type="text" id="manualSsid" placeholder=")rawliteral" T_SETUP_SSID_PLACEHOLDER R"rawliteral(">
       </div>
 
       <div class="form-group">
-        <label for="wifiPass">WLAN Passwort</label>
-        <input type="password" id="wifiPass" placeholder="Passwort eingeben">
+        <label for="wifiPass">)rawliteral" T_SETUP_WIFI_PASS_LABEL R"rawliteral(</label>
+        <input type="password" id="wifiPass" placeholder=")rawliteral" T_SETUP_WIFI_PASS_PLACEHOLDER R"rawliteral(">
       </div>
 
-      <button class="btn-primary" onclick="saveWifi()">💾 Speichern & Verbinden</button>
+      <button class="btn-primary" onclick="saveWifi()">)rawliteral" T_SETUP_SAVE_CONNECT R"rawliteral(</button>
 
       <div id="statusMsg" class="status-msg"></div>
 
-      <a href="/" class="nav-link">← Zurück zum Radio</a>
+      <a href="/" class="nav-link" title=")rawliteral" T_BACK_TO_RADIO R"rawliteral(" aria-label=")rawliteral" T_BACK_TO_RADIO R"rawliteral(">&larr; 📻</a>
     </div>
 
     <div class="card" style="margin-top: 0.5rem;">
-      <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem;">Optionen</h3>
-      <button class="btn-danger" onclick="resetWifi()">🗑️ Gekoppelte WLAN-Daten löschen</button>
+      <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem;">)rawliteral" T_SETUP_OPTIONS_HEADING R"rawliteral(</h3>
+      <button class="btn-danger" onclick="resetWifi()">)rawliteral" T_SETUP_RESET_BUTTON R"rawliteral(</button>
     </div>
 
     <div class="card">
-  <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.75rem;">MQTT / Home Assistant</h3>
-
-  <div class="form-group">
-    <label>Übertragungsmethode für WAV</label>
-    <div style="display: flex; gap: 1.5rem; margin-top: 0.3rem; margin-bottom: 0.75rem;">
-      <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-weight: normal;">
-        <input type="radio" name="wavTransport" value="mqtt" checked onclick="toggleSendMode('mqtt')"> MQTT
-      </label>
-      <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-weight: normal;">
-        <input type="radio" name="wavTransport" value="post" onclick="toggleSendMode('post')"> HTTP POST
-      </label>
+      <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.75rem;">MQTT / Home Assistant</h3>
+      <div class="form-group">
+        <label>)rawliteral" T_SETUP_WAV_TRANSPORT_LABEL R"rawliteral(</label>
+        <div style="display: flex; gap: 1.5rem; margin-top: 0.3rem; margin-bottom: 0.75rem;">
+          <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-weight: normal;">
+            <input type="radio" name="wavTransport" value="mqtt" checked onclick="toggleSendMode('mqtt')"> MQTT
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-weight: normal;">
+            <input type="radio" name="wavTransport" value="post" onclick="toggleSendMode('post')"> HTTP POST
+          </label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="mqttHost">)rawliteral" T_SETUP_MQTT_HOST_LABEL R"rawliteral(</label>
+        <input type="text" id="mqttHost" placeholder="192.168.10.3">
+      </div>
+      <div class="form-group">
+        <label for="mqttPort">Port</label>
+        <input type="text" id="mqttPort" value="1883" inputmode="numeric">
+      </div>
+      <div class="form-group">
+        <label for="mqttUser">)rawliteral" T_SETUP_MQTT_USER_LABEL R"rawliteral(</label>
+        <input type="text" id="mqttUser" placeholder=")rawliteral" T_SETUP_MQTT_LEAVE_EMPTY R"rawliteral(">
+      </div>
+      <div class="form-group">
+        <label for="mqttPass">)rawliteral" T_SETUP_MQTT_PASS_LABEL R"rawliteral(</label>
+        <input type="password" id="mqttPass" placeholder=")rawliteral" T_SETUP_MQTT_LEAVE_EMPTY R"rawliteral(">
+      </div>
+      <div class="form-group">
+        <label for="mqttBase">)rawliteral" T_SETUP_MQTT_BASE_LABEL R"rawliteral(</label>
+        <input type="text" id="mqttBase" value="esp32radio">
+      </div>
+      <div class="form-group" id="groupMqttWav">
+        <label for="mqttSendWav">)rawliteral" T_SETUP_WAV_MQTT_TOPIC_LABEL R"rawliteral(</label>
+        <input type="text" id="mqttSendWav" value="esp32radio/audio/upload">
+      </div>
+      <div class="form-group" id="groupPostUrl" style="display: none;">
+        <label for="sendWavUrl">)rawliteral" T_SETUP_WAV_HTTP_URL_LABEL R"rawliteral(</label>
+        <input type="url" id="sendWavUrl" value="" placeholder="http://192.168.1.50:1880/esp32radio/audio/upload">
+        <small style="color: var(--text-muted);">)rawliteral" T_SETUP_WAV_HTTP_HINT R"rawliteral(</small>
+      </div>
+      <button class="btn-primary" onclick="saveMqtt()">)rawliteral" T_SETUP_MQTT_SAVE R"rawliteral(</button>
+      <div id="mqttMsg" class="status-msg"></div>
+      <div id="mqttStatus" class="status-msg info" style="display: block;">)rawliteral" T_SETUP_MQTT_STATUS_LOADING R"rawliteral(</div>
     </div>
   </div>
-
-  <div class="form-group">
-    <label for="mqttHost">Broker-Adresse</label>
-    <input type="text" id="mqttHost" placeholder="192.168.10.3">
-  </div>
-  <div class="form-group">
-    <label for="mqttPort">Port</label>
-    <input type="text" id="mqttPort" value="1883" inputmode="numeric">
-  </div>
-  <div class="form-group">
-    <label for="mqttUser">Benutzername (optional)</label>
-    <input type="text" id="mqttUser" placeholder="leer lassen möglich">
-  </div>
-  <div class="form-group">
-    <label for="mqttPass">Passwort (optional)</label>
-    <input type="password" id="mqttPass" placeholder="leer lassen möglich">
-  </div>
-  <div class="form-group">
-    <label for="mqttBase">MQTT Topic-Basis</label>
-    <input type="text" id="mqttBase" value="esp32radio">
-  </div>
-
-  <!-- MQTT Topic Gruppe -->
-  <div class="form-group" id="groupMqttWav">
-    <label for="mqttSendWav">MQTT Topic für WAV-Nachrichten</label>
-    <input type="text" id="mqttSendWav" value="esp32radio/audio/upload">
-  </div>
-
-  <!-- HTTP POST URL Gruppe (standardmäßig ausgeblendet, da MQTT preselected ist) -->
-  <div class="form-group" id="groupPostUrl" style="display: none;">
-    <label for="sendWavUrl">HTTP-URL für WAV-Nachrichten</label>
-    <input type="url" id="sendWavUrl" value="" placeholder="http://192.168.1.50:1880/esp32radio/audio/upload">
-    <small style="color: var(--text-muted);">Nur http:// wird unterstützt. Verwende die IP-Adresse des Whisper-Servers, nicht localhost.</small>
-  </div>
-
-  <button class="btn-primary" onclick="saveMqtt()">💾 Übertragung speichern</button>
-  <div id="mqttMsg" class="status-msg"></div>
-  <div id="mqttStatus" class="status-msg info" style="display: block;">MQTT-Status wird geladen...</div>
-</div>
 
   <script>
     function showMsg(text, type) {
@@ -814,15 +809,15 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
 
     function scanWifi() {
       const sel = document.getElementById('ssidSelect');
-      sel.innerHTML = '<option value="">Suche Netzwerke...</option>';
-      showMsg('<span class="spinner"></span> Scanne WLANs...', 'info');
+      sel.innerHTML = '<option value="">)rawliteral" T_SETUP_SEARCHING_NETWORKS R"rawliteral(</option>';
+      showMsg('<span class="spinner"></span> )rawliteral" T_SETUP_SCANNING R"rawliteral(', 'info');
 
       fetch('/api/wifi/scan')
         .then(res => res.json())
         .then(networks => {
-          sel.innerHTML = '<option value="">-- Netzwerk auswählen --</option>';
+          sel.innerHTML = '<option value="">)rawliteral" T_SETUP_SELECT_NETWORK R"rawliteral(</option>';
           if (networks.length === 0) {
-            sel.innerHTML += '<option value="">Keine Netzwerke gefunden</option>';
+            sel.innerHTML += '<option value="">)rawliteral" T_SETUP_NO_NETWORKS R"rawliteral(</option>';
           } else {
             networks.forEach(net => {
               const opt = document.createElement('option');
@@ -831,10 +826,10 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
               sel.appendChild(opt);
             });
           }
-          showMsg(`${networks.length} Netzwerke gefunden.`, 'info');
+          showMsg(`)rawliteral" T_SETUP_NETWORKS_FOUND_PREFIX R"rawliteral(${networks.length})rawliteral" T_SETUP_NETWORKS_FOUND_SUFFIX R"rawliteral(`, 'info');
         })
         .catch(err => {
-          showMsg('Fehler beim Scannen der Netzwerke.', 'error');
+          showMsg(')rawliteral" T_SETUP_SCAN_ERROR R"rawliteral(', 'error');
         });
     }
 
@@ -850,11 +845,11 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       const pass = document.getElementById('wifiPass').value.trim();
 
       if (!ssid) {
-        showMsg('Bitte gib einen WLAN-Namen (SSID) an.', 'error');
+        showMsg(')rawliteral" T_SETUP_SSID_REQUIRED R"rawliteral(', 'error');
         return;
       }
 
-      showMsg('<span class="spinner"></span> Speichere und verbinde mit ' + ssid + '...', 'info');
+      showMsg('<span class="spinner"></span> )rawliteral" T_SETUP_SAVING_PREFIX R"rawliteral(' + ssid + ')rawliteral" T_SETUP_SAVING_SUFFIX R"rawliteral(', 'info');
 
       const formData = new FormData();
       formData.append('ssid', ssid);
@@ -863,18 +858,18 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       fetch('/api/wifi/save', { method: 'POST', body: formData })
         .then(res => res.text())
         .then(text => {
-          showMsg('✅ Gespeichert! Der ESP32 verbindet sich jetzt neu...<br><br><small>Falls du im Hotspot-Modus warst, verbinde dein Handy jetzt wieder mit deinem normalen WLAN.</small>', 'success');
+          showMsg(')rawliteral" T_SETUP_SAVED R"rawliteral(<br><br><small>)rawliteral" T_SETUP_SAVED_HOTSPOT_HINT R"rawliteral(</small>', 'success');
         })
         .catch(err => {
-          showMsg('Fehler beim Speichern der Daten.', 'error');
+          showMsg(')rawliteral" T_SETUP_SAVE_ERROR R"rawliteral(', 'error');
         });
     }
 
     function resetWifi() {
-      if (confirm('Möchtest du die gespeicherten WLAN-Zugangsdaten wirklich löschen?')) {
+      if (confirm(')rawliteral" T_SETUP_RESET_CONFIRM R"rawliteral(')) {
         fetch('/api/wifi/reset', { method: 'POST' })
           .then(() => {
-            showMsg('WLAN-Daten gelöscht. Startet neu...', 'info');
+            showMsg(')rawliteral" T_SETUP_RESET_DONE R"rawliteral(', 'info');
             setTimeout(() => { location.reload(); }, 2000);
           });
       }
@@ -902,18 +897,18 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
         .then(data => {
           const status = document.getElementById('mqttStatus');
           const labels = {
-            disabled: 'MQTT deaktiviert',
-            connected: 'MQTT zu ' + data.host + ':' + data.port + ' verbunden',
-            disconnected: 'MQTT zu ' + data.host + ':' + data.port + ' getrennt'
+            disabled: ')rawliteral" T_SETUP_MQTT_DISABLED R"rawliteral(',
+            connected: ')rawliteral" T_SETUP_MQTT_CONNECTED_PREFIX R"rawliteral(' + data.host + ':' + data.port + ')rawliteral" T_SETUP_MQTT_CONNECTED_SUFFIX R"rawliteral(',
+            disconnected: ')rawliteral" T_SETUP_MQTT_DISCONNECTED_PREFIX R"rawliteral(' + data.host + ':' + data.port + ')rawliteral" T_SETUP_MQTT_DISCONNECTED_SUFFIX R"rawliteral('
           };
           status.className = 'status-msg ' + (data.status === 'connected' ? 'success' : 'info');
-          status.innerText = labels[data.status] || 'MQTT-Status unbekannt';
+          status.innerText = labels[data.status] || ')rawliteral" T_SETUP_MQTT_UNKNOWN R"rawliteral(';
           status.style.display = 'block';
         })
         .catch(() => {
           const status = document.getElementById('mqttStatus');
           status.className = 'status-msg error';
-          status.innerText = 'MQTT-Status nicht erreichbar';
+          status.innerText = ')rawliteral" T_SETUP_MQTT_UNREACHABLE R"rawliteral(';
           status.style.display = 'block';
         });
     }
@@ -924,7 +919,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       if (transport === 'post' && !sendWavUrl.startsWith('http://')) {
         const msg = document.getElementById('mqttMsg');
         msg.className = 'status-msg error';
-        msg.innerText = 'Bitte eine HTTP-URL beginnend mit http:// eingeben.';
+        msg.innerText = ')rawliteral" T_SETUP_HTTP_URL_REQUIRED R"rawliteral(';
         msg.style.display = 'block';
         return;
       }
@@ -944,19 +939,30 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
         .then(() => {
           const msg = document.getElementById('mqttMsg');
           msg.className = 'status-msg success';
-          msg.innerText = 'WAV-Übertragungseinstellungen gespeichert.';
+          msg.innerText = ')rawliteral" T_SETUP_MQTT_SAVED R"rawliteral(';
           msg.style.display = 'block';
           loadMqttStatus();
         })
         .catch(error => {
           const msg = document.getElementById('mqttMsg');
           msg.className = 'status-msg error';
-          msg.innerText = 'Speichern fehlgeschlagen: ' + error;
+          msg.innerText = ')rawliteral" T_SETUP_SAVE_FAILED_PREFIX R"rawliteral(' + error;
           msg.style.display = 'block';
         });
     }
 
-    scanWifi();
+    // A scan briefly interrupts the Wi-Fi connection, so scan automatically only in hotspot mode.
+    // While connected, the subtitle shows the current network instead.
+    fetch('/api/status')
+      .then(res => res.json())
+      .then(data => {
+        if (data.ap_mode) {
+          scanWifi();
+        } else if (data.ssid) {
+          document.getElementById('wifiSubtitle').innerText = ')rawliteral" T_SETUP_CONNECTED_PREFIX R"rawliteral(' + '"' + data.ssid + '"' + ')rawliteral" T_SETUP_CONNECTED_SUFFIX R"rawliteral(';
+        }
+      })
+      .catch(() => {});
     loadMqtt();
     loadMqttStatus();
     setInterval(loadMqttStatus, 2000);
@@ -966,15 +972,15 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 // ==========================================
-// 3. Wecker Web-Oberfläche
+// 3. Alarm web interface
 // ==========================================
 const char ALARM_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html lang="de">
+<html lang=")rawliteral" T_HTML_LANG R"rawliteral(">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Wecker - ESP32 Radio</title>
+  <title>)rawliteral" T_ALARM_PAGE_TITLE R"rawliteral(</title>
   <style>
     :root {
       --bg: #0f172a;
@@ -1024,33 +1030,33 @@ const char ALARM_HTML[] PROGMEM = R"rawliteral(
     .status-msg.success { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid var(--active); }
     .status-msg.error { background: rgba(239, 68, 68, 0.15); color: #f8f8f8; border: 1px solid var(--danger); }
     
-    .nav-link { display: block; text-align: center; margin-top: 1rem; color: var(--text-muted); text-decoration: none; font-size: 0.85rem; }
+    .nav-link { display: block; text-align: center; margin-top: 1rem; color: var(--text-muted); text-decoration: none; font-size: 1.6rem; }
     .nav-link:hover { color: var(--accent); }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="card">
-      <h1>⏰ Radio-Wecker</h1>
-      <div class="subtitle">Echtzeit-Uhrzeit & Weckeinstellungen</div>
+      <h1>)rawliteral" T_ALARM_HEADING R"rawliteral(</h1>
+      <div class="subtitle">)rawliteral" T_ALARM_SUBTITLE R"rawliteral(</div>
 
       <div class="clock-display">
-        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.2rem;">ESP32 Uhrzeit (NTP)</div>
-        <div class="clock-time" id="currentTime">Lade...</div>
+        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.2rem;">)rawliteral" T_ALARM_CLOCK_LABEL R"rawliteral(</div>
+        <div class="clock-time" id="currentTime">)rawliteral" T_LOADING R"rawliteral(</div>
       </div>
 
       <div class="toggle-row" style="margin-bottom: 1.2rem;">
-        <span style="font-size: 0.85rem; color: var(--text-muted);">Aktueller Weckton</span>
-        <strong id="alarmSource" style="font-size: 0.85rem; text-align: right; max-width: 60%; overflow-wrap: anywhere;">Lade...</strong>
+        <span style="font-size: 0.85rem; color: var(--text-muted);">)rawliteral" T_ALARM_CURRENT_SOUND R"rawliteral(</span>
+        <strong id="alarmSource" style="font-size: 0.85rem; text-align: right; max-width: 60%; overflow-wrap: anywhere;">)rawliteral" T_LOADING R"rawliteral(</strong>
       </div>
 
       <div class="form-group">
-        <label for="alarmTime">Weckzeit</label>
+        <label for="alarmTime">)rawliteral" T_ALARM_TIME_LABEL R"rawliteral(</label>
         <input type="time" id="alarmTime" value="07:00">
       </div>
 
       <div class="toggle-row">
-        <span style="font-size: 0.9rem; font-weight: 600;">Wecker aktivieren</span>
+        <span style="font-size: 0.9rem; font-weight: 600;">)rawliteral" T_ALARM_ENABLE R"rawliteral(</span>
         <label class="switch">
           <input type="checkbox" id="alarmEnabled">
           <span class="slider"></span>
@@ -1059,23 +1065,23 @@ const char ALARM_HTML[] PROGMEM = R"rawliteral(
 
       <div class="volume-box">
         <div class="volume-label">
-          <span>Weck-Lautstärke</span>
+          <span>)rawliteral" T_ALARM_VOLUME_LABEL R"rawliteral(</span>
           <span id="volVal">15 / 21</span>
         </div>
-        <input type="range" id="alarmVol" min="0" max="21" value="15" oninput="document.getElementById('volVal').innerText = this.value + ' / 21'">
+        <input type="range" id="alarmVol" min="0" max="21" value="15" oninput="alarmVolumeInput(this.value)">
       </div>
 
-      <button class="btn-primary" onclick="saveAlarm()">💾 Wecker speichern</button>
+      <button class="btn-primary" onclick="saveAlarm()">)rawliteral" T_ALARM_SAVE_BUTTON R"rawliteral(</button>
 
       <div id="statusMsg" class="status-msg"></div>
-      <div id="stationMsg" class="status-msg error" style="display: none;">Bitte zuerst eine M3U-Senderliste auf der Hauptseite hochladen.</div>
+      <div id="stationMsg" class="status-msg error" style="display: none;">)rawliteral" T_ALARM_NEED_STATIONS_MAIN R"rawliteral(</div>
 
-      <a href="/" class="nav-link"><h1>📻</h1></a>
+      <a href="/" class="nav-link" title=")rawliteral" T_BACK_TO_RADIO R"rawliteral(" aria-label=")rawliteral" T_BACK_TO_RADIO R"rawliteral(">&larr; 📻</a>
     </div>
 
     <div class="card">
-      <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem;">Testen</h3>
-      <button class="btn-secondary" onclick="testAlarm()">🔔 Wecker jetzt sofort testen</button>
+      <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem;">)rawliteral" T_ALARM_TEST_HEADING R"rawliteral(</h3>
+      <button class="btn-secondary" id="testButton" onclick="testAlarm()">)rawliteral" T_ALARM_TEST_BUTTON R"rawliteral(</button>
     </div>
   </div>
 
@@ -1089,6 +1095,8 @@ const char ALARM_HTML[] PROGMEM = R"rawliteral(
     }
 
     let alarmEditing = false;
+    let alarmPlaying = false;
+    let alarmVolTimeout;
     let clockSeconds = null;
 
     function setClockFromServer(value) {
@@ -1107,7 +1115,7 @@ const char ALARM_HTML[] PROGMEM = R"rawliteral(
       const hours = String(Math.floor(clockSeconds / 3600) % 24).padStart(2, '0');
       const minutes = String(Math.floor(clockSeconds / 60) % 60).padStart(2, '0');
       const seconds = String(clockSeconds % 60).padStart(2, '0');
-      document.getElementById('currentTime').innerText = `${hours}:${minutes}:${seconds} Uhr`;
+      document.getElementById('currentTime').innerText = `${hours}:${minutes}:${seconds})rawliteral" T_ALARM_CLOCK_SUFFIX R"rawliteral(`;
       clockSeconds = (clockSeconds + 1) % 86400;
     }
 
@@ -1115,8 +1123,18 @@ const char ALARM_HTML[] PROGMEM = R"rawliteral(
       alarmEditing = true;
     }
 
+    // While an alarm plays, the slider changes the playing volume live (not persisted until "save")
+    function alarmVolumeInput(val) {
+      document.getElementById('volVal').innerText = val + ' / 21';
+      if (!alarmPlaying) return;
+      clearTimeout(alarmVolTimeout);
+      alarmVolTimeout = setTimeout(() => {
+        fetch('/api/alarm/volume?val=' + val, { method: 'POST' });
+      }, 100);
+    }
+
     function loadAlarmStatus() {
-      fetch('/api/alarm/status')
+      return fetch('/api/alarm/status')
         .then(res => res.json())
         .then(data => {
           setClockFromServer(data.current_time);
@@ -1128,13 +1146,16 @@ const char ALARM_HTML[] PROGMEM = R"rawliteral(
             document.getElementById('alarmVol').value = data.volume;
             document.getElementById('volVal').innerText = data.volume + " / 21";
           }
-            document.getElementById('alarmSource').innerText = data.alarm_label || (data.source === 'sd' ? 'SD-Datei: ' + data.sd_path : 'Radio');
+            document.getElementById('alarmSource').innerText = data.alarm_label || (data.source === 'sd' ? ')rawliteral" T_ALARM_LABEL_SD_FILE_PREFIX R"rawliteral(' + data.sd_path : 'Radio');
           const available = data.station_count > 0;
+          alarmPlaying = data.alarm_playing === true;
+          const testButton = document.getElementById('testButton');
+          testButton.innerText = alarmPlaying ? ')rawliteral" T_ALARM_STOP_TEST_BUTTON R"rawliteral(' : ')rawliteral" T_ALARM_TEST_BUTTON R"rawliteral(';
           document.getElementById('stationMsg').style.display = available ? 'none' : 'block';
           document.getElementById('alarmEnabled').disabled = !available;
-          document.getElementById('alarmVol').disabled = !available;
+          document.getElementById('alarmVol').disabled = !available && !alarmPlaying;
           document.querySelector('button[onclick="saveAlarm()"]').disabled = !available;
-          document.querySelector('button[onclick="testAlarm()"]').disabled = !available;
+          testButton.disabled = !available && !alarmPlaying;
         });
     }
 
@@ -1158,224 +1179,41 @@ const char ALARM_HTML[] PROGMEM = R"rawliteral(
         .then(res => res.text())
         .then(() => {
           alarmEditing = false;
-          showMsg('✅ Wecker-Einstellungen gespeichert!', 'success');
+          showMsg(')rawliteral" T_ALARM_SAVED_MSG R"rawliteral(', 'success');
           loadAlarmStatus();
         });
     }
 
     function testAlarm() {
+      const stopping = alarmPlaying;
       fetch('/api/alarm/test', { method: 'POST' })
         .then(res => {
           if (!res.ok) throw new Error('Keine Senderliste');
-          showMsg('🔔 Weck-Signal ausgelöst!', 'success');
+          showMsg(stopping ? ')rawliteral" T_ALARM_STOPPED_MSG R"rawliteral(' : ')rawliteral" T_ALARM_TRIGGERED_MSG R"rawliteral(', 'success');
+          return loadAlarmStatus();
         })
-        .catch(() => showMsg('Bitte zuerst eine M3U-Senderliste hochladen.', 'error'));
+        .catch(() => showMsg(')rawliteral" T_ALARM_NEED_STATIONS R"rawliteral(', 'error'));
     }
 
     document.getElementById('alarmTime').addEventListener('input', markAlarmEditing);
     document.getElementById('alarmEnabled').addEventListener('change', markAlarmEditing);
     document.getElementById('alarmVol').addEventListener('input', markAlarmEditing);
     loadAlarmStatus();
+    setInterval(loadAlarmStatus, 2000);
     setInterval(updateClock, 1000);
   </script>
 </body>
 </html>
 )rawliteral";
 
-// ==========================================
-// 4. MicroSD Web-Oberfläche
-// ==========================================
-const char SDCARD_LEGACY_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html lang="de">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MicroSD - ESP32 Radio</title>
-  <style>
-    :root {
-      --bg: #0f172a;
-      --card-bg: #1e293b;
-      --accent: #38bdf8;
-      --accent-hover: #0284c7;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --border: #334155;
-      --active: #10b981;
-      --danger: #ef4444;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg); color: var(--text); padding: 1.5rem; display: flex; justify-content: center; min-height: 100vh; }
-    .container { max-width: 480px; width: 100%; display: flex; flex-direction: column; gap: 1.25rem; }
-    .card { background: var(--card-bg); border-radius: 1rem; padding: 1.5rem; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); }
-    h1 { font-size: 1.4rem; color: var(--accent); margin-bottom: 0.25rem; text-align: center; }
-    .subtitle { text-align: center; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.25rem; }
-    
-    .clock-display { text-align: center; background: #0f172a; padding: 1rem; border-radius: 0.75rem; border: 1px solid var(--border); margin-bottom: 1.25rem; }
-    .clock-time { font-size: 1.8rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
-    
-    .form-group { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1.2rem; }
-    label { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
-    input[type=time] { background: #0f172a; border: 1px solid var(--border); border-radius: 0.5rem; color: var(--text); padding: 0.75rem; font-size: 1.3rem; outline: none; width: 100%; text-align: center; font-weight: 700; }
-    input[type=time]:focus { border-color: var(--accent); }
-    
-    .toggle-row { display: flex; justify-content: space-between; align-items: center; background: #0f172a; padding: 0.75rem 1rem; border-radius: 0.5rem; border: 1px solid var(--border); }
-    .switch { position: relative; display: inline-block; width: 48px; height: 26px; }
-    .switch input { opacity: 0; width: 0; height: 0; }
-    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #334155; transition: .3s; border-radius: 26px; }
-    .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
-    input:checked + .slider { background-color: var(--active); }
-    input:checked + .slider:before { transform: translateX(22px); }
-
-    .volume-box { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 1rem; }
-    .volume-label { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted); }
-    input[type=range] { width: 100%; height: 6px; border-radius: 3px; background: #334155; outline: none; -webkit-appearance: none; accent-color: var(--accent); }
-
-    button { cursor: pointer; border: none; border-radius: 0.5rem; font-weight: 600; padding: 0.75rem 1rem; transition: all 0.2s; font-size: 0.95rem; width: 100%; margin-top: 1rem; }
-    .btn-primary { background: var(--accent); color: #0f172a; }
-    .btn-primary:hover { background: var(--accent-hover); }
-    .btn-secondary { background: #334155; color: var(--text); }
-    .btn-secondary:hover { background: #475569; }
-
-    .status-msg { margin-top: 1rem; padding: 0.75rem; border-radius: 0.5rem; font-size: 0.85rem; text-align: center; display: none; }
-    .status-msg.success { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid var(--active); }
-    .status-msg.error { background: rgba(239, 68, 68, 0.15); color: #f8f8f8; border: 1px solid var(--danger); }
-    
-    .nav-link { display: block; text-align: center; margin-top: 1rem; color: var(--text-muted); text-decoration: none; font-size: 0.85rem; }
-    .nav-link:hover { color: var(--accent); }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="card">
-      <h1>💾 MicroSD</h1>
-      <div class="subtitle">Verwalten der MicroSD-Karte</div>
-
-      <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--accent);">Gespeicherte Dateien</h3>
-      <div class="station-grid" id="fileList"></div>
-
-      <button class="btn-primary" onclick="saveAlarm()">💾 Datei als Wecker speichern</button>
-
-      <div id="statusMsg" class="status-msg"></div>
-
-      <a href="/" class="nav-link"><h1>📻</h1></a>
-    </div>
-
-    <div class="card">
-      <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem;">Abspielen</h3>
-      <button class="btn-secondary" onclick="randomPlay()">🔔 Files abspielen</button>
-    </div>
-  </div>
-
-  <script>
-    function showMsg(text, type) {
-      const msg = document.getElementById('statusMsg');
-      msg.className = 'status-msg ' + type;
-      msg.innerHTML = text;
-      msg.style.display = 'block';
-      setTimeout(() => { msg.style.display = 'none'; }, 3000);
-    }
-
-    let alarmEditing = false;
-    let clockSeconds = null;
-
-    function setClockFromServer(value) {
-      const match = value.match(/^(\d{2}):(\d{2}):(\d{2})/);
-      if (!match) {
-        clockSeconds = null;
-        document.getElementById('currentTime').innerText = value;
-        return;
-      }
-      clockSeconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
-      updateClock();
-    }
-
-    function updateClock() {
-      if (clockSeconds === null) return;
-      const hours = String(Math.floor(clockSeconds / 3600) % 24).padStart(2, '0');
-      const minutes = String(Math.floor(clockSeconds / 60) % 60).padStart(2, '0');
-      const seconds = String(clockSeconds % 60).padStart(2, '0');
-      document.getElementById('currentTime').innerText = `${hours}:${minutes}:${seconds} Uhr`;
-      clockSeconds = (clockSeconds + 1) % 86400;
-    }
-
-    function markAlarmEditing() {
-      alarmEditing = true;
-    }
-
-    function loadAlarmStatus() {
-      fetch('/api/alarm/status')
-        .then(res => res.json())
-        .then(data => {
-          setClockFromServer(data.current_time);
-          if (!alarmEditing) {
-            const h = String(data.hour).padStart(2, '0');
-            const m = String(data.minute).padStart(2, '0');
-            document.getElementById('alarmTime').value = `${h}:${m}`;
-            document.getElementById('alarmEnabled').checked = data.enabled;
-            document.getElementById('alarmVol').value = data.volume;
-            document.getElementById('volVal').innerText = data.volume + " / 21";
-          }
-          const available = data.station_count > 0;
-          document.getElementById('stationMsg').style.display = available ? 'none' : 'block';
-          document.getElementById('alarmEnabled').disabled = !available;
-          document.getElementById('alarmVol').disabled = !available;
-          document.querySelector('button[onclick="saveAlarm()"]').disabled = !available;
-          document.querySelector('button[onclick="testAlarm()"]').disabled = !available;
-        });
-    }
-
-    function saveAlarm() {
-      if (document.getElementById('alarmEnabled').disabled) return;
-      const timeVal = document.getElementById('alarmTime').value;
-      if (!timeVal) return;
-      const parts = timeVal.split(':');
-      const hour = parseInt(parts[0], 10);
-      const minute = parseInt(parts[1], 10);
-      const enabled = document.getElementById('alarmEnabled').checked;
-      const volume = parseInt(document.getElementById('alarmVol').value, 10);
-
-      const formData = new FormData();
-      formData.append('hour', hour);
-      formData.append('minute', minute);
-      formData.append('enabled', enabled ? '1' : '0');
-      formData.append('volume', volume);
-
-      fetch('/api/alarm/save', { method: 'POST', body: formData })
-        .then(res => res.text())
-        .then(() => {
-          alarmEditing = false;
-          showMsg('✅ Wecker-Einstellungen gespeichert!', 'success');
-          loadAlarmStatus();
-        });
-    }
-
-    function testAlarm() {
-      fetch('/api/alarm/test', { method: 'POST' })
-        .then(res => {
-          if (!res.ok) throw new Error('Keine Senderliste');
-          showMsg('🔔 Weck-Signal ausgelöst!', 'success');
-        })
-        .catch(() => showMsg('Bitte zuerst eine M3U-Senderliste hochladen.', 'error'));
-    }
-
-    document.getElementById('alarmTime').addEventListener('input', markAlarmEditing);
-    document.getElementById('alarmEnabled').addEventListener('change', markAlarmEditing);
-    document.getElementById('alarmVol').addEventListener('input', markAlarmEditing);
-    loadAlarmStatus();
-    setInterval(updateClock, 1000);
-  </script>
-</body>
-</html>
-)rawliteral";
 
 const char SDCARD_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html lang="de">
+<html lang=")rawliteral" T_HTML_LANG R"rawliteral(">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MicroSD - ESP32 Radio</title>
+  <title>)rawliteral" T_SD_PAGE_TITLE R"rawliteral(</title>
   <style>
     :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#f8fafc; --muted:#94a3b8; --accent:#38bdf8; --ok:#34d399; --bad:#f87171; }
     * { box-sizing:border-box; }
@@ -1413,37 +1251,38 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
     .empty { color:var(--muted); padding:.75rem 0; }
     a { color:var(--muted); display:block; text-align:center; margin-top:1rem; text-decoration:none; }
     a:hover { color:var(--accent); }
+    a.nav-link { font-size:1.6rem; }
   </style>
 </head>
 <body>
   <main>
     <section>
-      <h1>MicroSD-Dateien</h1>
-      <p>Lokale Audiodateien abspielen oder als Weckerquelle speichern.</p>
+      <h1>)rawliteral" T_SD_HEADING R"rawliteral(</h1>
+      <p>)rawliteral" T_SD_INTRO R"rawliteral(</p>
       <div id="status" role="status"></div>
       <div class="actions">
-        <button onclick="playAll()">▶ Alle abspielen</button>
-        <button class="secondary" onclick="stopAll()">■ Alle stoppen</button>
-        <button class="secondary" onclick="loadFiles()">↻ Aktualisieren</button>
+        <button onclick="playAll()">)rawliteral" T_SD_PLAY_ALL R"rawliteral(</button>
+        <button class="secondary" onclick="stopAll()">)rawliteral" T_SD_STOP_ALL R"rawliteral(</button>
+        <button class="secondary" onclick="loadFiles()">)rawliteral" T_SD_REFRESH R"rawliteral(</button>
       </div>
     </section>
     <section>
-      <h2>Weckton hochladen</h2>
+      <h2>)rawliteral" T_SD_UPLOAD_HEADING R"rawliteral(</h2>
       <form id="audioUpload" enctype="multipart/form-data">
-        <input type="file" id="alarmFile" name="file" accept=".mp3,.wav,.aac,.flac" aria-label="Weckton auswählen" required>
-        <button type="submit" id="uploadButton">Weckton hochladen</button>
+        <input type="file" id="alarmFile" name="file" accept=".mp3,.wav,.aac,.flac" aria-label=")rawliteral" T_SD_FILE_ARIA R"rawliteral(" required>
+        <button type="submit" id="uploadButton">)rawliteral" T_SD_UPLOAD_BUTTON R"rawliteral(</button>
       </form>
       <div class="empty" id="uploadStatus" role="status"></div>
     </section>
     <section>
-      <h2>Audiodateien</h2>
-      <div id="fileList"><div class="empty">Dateien werden geladen ...</div></div>
+      <h2>)rawliteral" T_SD_FILES_HEADING R"rawliteral(</h2>
+      <div id="fileList"><div class="empty">)rawliteral" T_SD_LOADING_FILES R"rawliteral(</div></div>
     </section>
     <section>
-      <h2>Trainingsaufnahmen</h2>
-      <div id="sdTrainingList"><div class="empty">Aufnahmen werden geladen ...</div></div>
+      <h2>)rawliteral" T_SD_TRAINING_HEADING R"rawliteral(</h2>
+      <div id="sdTrainingList"><div class="empty">)rawliteral" T_SD_LOADING_TRAINING R"rawliteral(</div></div>
     </section>
-    <a href="/">← Zurück zum Radio</a>
+    <a href="/" class="nav-link" title=")rawliteral" T_BACK_TO_RADIO R"rawliteral(" aria-label=")rawliteral" T_BACK_TO_RADIO R"rawliteral(">&larr; 📻</a>
   </main>
   <script>
     const list = document.getElementById('fileList');
@@ -1455,7 +1294,7 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
     async function request(url, options) {
       const response = await fetch(url, options);
       const text = await response.text();
-      if (!response.ok) throw new Error(text || 'Aktion fehlgeschlagen');
+      if (!response.ok) throw new Error(text || ')rawliteral" T_SD_ACTION_FAILED R"rawliteral(');
       return text;
     }
     function row(file, training = false) {
@@ -1471,38 +1310,38 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
       tools.className = 'file-tools';
       const play = document.createElement('button');
       play.textContent = '▶';
-      play.title = 'Auf dem Gerät abspielen';
+      play.title = ')rawliteral" T_SD_PLAY_TITLE R"rawliteral(';
       play.setAttribute('aria-label', play.title);
       play.onclick = () => request('/api/sd/play?path=' + encodeURIComponent(file.path))
-        .then(() => message('Wiedergabe gestartet.', true)).catch(error => message(error.message, false));
+        .then(() => message(')rawliteral" T_SD_PLAY_STARTED R"rawliteral(', true)).catch(error => message(error.message, false));
       const alarm = document.createElement('button');
       alarm.className = 'secondary';
       alarm.textContent = '⏰';
-      alarm.title = 'Als Weckton speichern';
+      alarm.title = ')rawliteral" T_SD_SET_ALARM_TITLE R"rawliteral(';
       alarm.setAttribute('aria-label', alarm.title);
       alarm.onclick = () => request('/api/sd/alarm', { method:'POST', body:new URLSearchParams({ path:file.path }) })
-        .then(() => message('Datei als Weckerquelle gespeichert.', true)).catch(error => message(error.message, false));
+        .then(() => message(')rawliteral" T_SD_ALARM_SAVED R"rawliteral(', true)).catch(error => message(error.message, false));
       const download = document.createElement('a');
       const trainingUrl = '/api/training/file?name=' + encodeURIComponent(file.name || '');
       download.href = training ? trainingUrl + '&download=1' : '/api/sd/download?path=' + encodeURIComponent(file.path);
       download.download = file.path.split('/').pop();
       download.textContent = '⬇';
-      download.title = 'Herunterladen';
+      download.title = ')rawliteral" T_SD_DOWNLOAD_TITLE R"rawliteral(';
       download.setAttribute('aria-label', download.title);
       const remove = document.createElement('button');
       remove.className = 'secondary';
       remove.textContent = '🗑';
-      remove.title = 'Löschen';
+      remove.title = ')rawliteral" T_SD_DELETE_TITLE R"rawliteral(';
       remove.setAttribute('aria-label', remove.title);
       remove.onclick = async () => {
-        if (!confirm('Datei "' + file.path + '" löschen?')) return;
+        if (!confirm(')rawliteral" T_SD_DELETE_CONFIRM_PREFIX R"rawliteral(' + '"' + file.path + '"' + ')rawliteral" T_SD_DELETE_CONFIRM_SUFFIX R"rawliteral(')) return;
         remove.disabled = true;
         try {
           await request(training ? '/api/training/delete' : '/api/sd/delete', {
             method:'POST', body:new URLSearchParams(training ? { name:file.name } : { path:file.path })
           });
           await loadFiles();
-          message('Datei gelöscht.', true);
+          message(')rawliteral" T_SD_DELETED R"rawliteral(', true);
         } catch (error) { message(error.message, false); }
         finally { remove.disabled = false; }
       };
@@ -1524,19 +1363,19 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
     async function loadFiles() {
       try {
         const [files, training] = await Promise.all([
-          fetch('/api/sd/files').then(response => { if (!response.ok) throw new Error('SD-Liste nicht erreichbar'); return response.json(); }),
-          fetch('/api/training/list').then(response => { if (!response.ok) throw new Error('Trainingsliste nicht erreichbar'); return response.json(); })
+          fetch('/api/sd/files').then(response => { if (!response.ok) throw new Error(')rawliteral" T_SD_LIST_UNREACHABLE R"rawliteral('); return response.json(); }),
+          fetch('/api/training/list').then(response => { if (!response.ok) throw new Error(')rawliteral" T_SD_TRAINING_UNREACHABLE R"rawliteral('); return response.json(); })
         ]);
         list.replaceChildren();
-        if (!files.length) list.innerHTML = '<div class="empty">Keine abspielbaren Dateien gefunden oder keine SD-Karte eingelegt.</div>';
+        if (!files.length) list.innerHTML = '<div class="empty">)rawliteral" T_SD_NO_FILES R"rawliteral(</div>';
         files.forEach(file => list.appendChild(row(file)));
         const recordings = document.getElementById('sdTrainingList');
         recordings.replaceChildren();
-        if (!training.files.length) recordings.innerHTML = '<div class="empty">Keine Trainingsaufnahmen vorhanden.</div>';
+        if (!training.files.length) recordings.innerHTML = '<div class="empty">)rawliteral" T_SD_NO_TRAINING R"rawliteral(</div>';
         training.files.forEach(file => recordings.appendChild(row({ ...file, path:'/wakeword/training/' + file.name }, true)));
         document.getElementById('uploadButton').disabled = !training.sd;
-        message(files.length + ' Audiodatei(en), ' + training.files.length + ' Trainingsaufnahme(n).', true);
-      } catch (error) { list.innerHTML = '<div class="empty">SD-Dateien konnten nicht geladen werden.</div>'; message(error.message, false); }
+        message(')rawliteral" T_SD_COUNTS_PREFIX R"rawliteral(' + files.length + ')rawliteral" T_SD_COUNTS_MID R"rawliteral(' + training.files.length + ')rawliteral" T_SD_COUNTS_SUFFIX R"rawliteral(', true);
+      } catch (error) { list.innerHTML = '<div class="empty">)rawliteral" T_SD_LOAD_FAILED R"rawliteral(</div>'; message(error.message, false); }
     }
     document.getElementById('audioUpload').addEventListener('submit', async event => {
       event.preventDefault();
@@ -1546,12 +1385,12 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
       const file = input.files[0];
       if (!file) return;
       if (file.size > 20 * 1024 * 1024 || !file.size) {
-        feedback.textContent = 'Bitte eine Datei mit 1 Byte bis 20 MB auswählen.';
+        feedback.textContent = ')rawliteral" T_SD_UPLOAD_SIZE_HINT R"rawliteral(';
         return;
       }
       button.disabled = true;
       input.disabled = true;
-      feedback.textContent = 'Upload läuft...';
+      feedback.textContent = ')rawliteral" T_SD_UPLOAD_RUNNING R"rawliteral(';
       try {
         const data = new FormData();
         data.append('file', file);
@@ -1562,8 +1401,8 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
       } catch (error) { feedback.textContent = error.message; }
       finally { button.disabled = false; input.disabled = false; }
     });
-    function playAll() { request('/api/sd/play-all', { method:'POST' }).then(() => message('Alle Dateien werden nacheinander abgespielt.', true)).catch(error => message(error.message, false)); }
-    function stopAll() { request('/api/sd/stop-all', { method:'POST' }).then(() => message('Wiedergabe gestoppt.', true)).catch(error => message(error.message, false)); }
+    function playAll() { request('/api/sd/play-all', { method:'POST' }).then(() => message(')rawliteral" T_SD_PLAY_ALL_MSG R"rawliteral(', true)).catch(error => message(error.message, false)); }
+    function stopAll() { request('/api/sd/stop-all', { method:'POST' }).then(() => message(')rawliteral" T_SD_STOPPED R"rawliteral(', true)).catch(error => message(error.message, false)); }
     loadFiles();
   </script>
 </body>

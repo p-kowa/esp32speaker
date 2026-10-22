@@ -10,11 +10,11 @@ struct StoredStation {
 
 namespace station_files {
 static const char DIR[] = "/radio";
-// Eine Zeile pro Sender: "name<TAB>url\n"
+// One line per station: "name<TAB>url\n"
 static const char DATA[] = "/radio/stations.tsv";
-// Pro Sender ein uint32 mit dem Byte-Offset der Zeile in DATA
+// One uint32 per station with the byte offset of the line in DATA
 static const char INDEX[] = "/radio/stations.idx";
-// FATFS ist ohne LFN gebaut: nur 8.3-Dateinamen
+// FATFS is built without LFN: 8.3 file names only
 static const char DATA_TMP[] = "/radio/newlist.tsv";
 static const char INDEX_TMP[] = "/radio/newlist.idx";
 }
@@ -52,7 +52,7 @@ private:
     public:
         explicit LineReader(File &file) : file(file) {}
 
-        // Ueberlange Zeilen werden auf MAX_LINE gekuerzt
+        // Overlong lines are truncated to MAX_LINE
         bool next(String &line) {
             line = "";
             bool any = false;
@@ -208,7 +208,7 @@ private:
     }
 
 public:
-    // sdFs == nullptr: Fallback auf NVS mit max. NVS_MAX_STATIONS Sendern
+    // sdFs == nullptr: fall back to NVS with at most NVS_MAX_STATIONS stations
     void begin(fs::FS *sdFs) {
         fs = sdFs;
         loadNvsStations();
@@ -222,7 +222,7 @@ public:
         if (!fs->exists(station_files::DIR)) fs->mkdir(station_files::DIR);
         refreshSdCount();
 
-        // Einmalige Uebernahme der alten NVS-Liste auf die SD-Karte
+        // One-time migration of the old NVS list to the SD card
         if (sdCount == 0 && nvsCount > 0 && beginImport(false)) {
             for (size_t i = 0; i < nvsCount; ++i) addImportedEntry(nvsStations[i].name, nvsStations[i].url);
             endImport();
@@ -307,7 +307,7 @@ public:
                 size_t id = 0;
                 while (reader.next(line)) {
                     if (parseLine(line, station)) consider(id, station);
-                    // Idle-Task laufen lassen (Task-Watchdog) bei grossen Listen
+                    // Let the idle task run (task watchdog) for large lists
                     if ((++id & 0xFF) == 0) vTaskDelay(1);
                 }
                 data.close();
@@ -369,7 +369,7 @@ public:
         return sdCount == 0;
     }
 
-    // ---------- Streaming-Import (M3U) ----------
+    // ---------- Streaming import (M3U) ----------
     bool beginImport(bool replace) {
         if (importing) abortImport();
         importReplace = replace;
@@ -449,7 +449,7 @@ public:
         return endImport();
     }
 
-    // ---------- Zuletzt gewaehlter Sender ----------
+    // ---------- Last selected station ----------
     void setLastSelected(const StoredStation &station) {
         if (station.name == lastName && station.url == lastUrl) return;
         lastName = station.name;
@@ -466,7 +466,7 @@ public:
         return true;
     }
 
-    // ---------- Favoriten ----------
+    // ---------- Favorites ----------
     size_t favSize() const { return favCount; }
 
     bool favGet(size_t index, StoredStation &station) const {

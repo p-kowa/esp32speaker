@@ -28,7 +28,7 @@ private:
 
 public:
     void begin() {
-        // Initialisiert Preferences NVS Speicher
+        // Initializes Preferences NVS storage
     }
 
     void loadCredentials(String &ssid, String &pass) {
@@ -43,14 +43,14 @@ public:
         prefs.putString("ssid", ssid);
         prefs.putString("pass", pass);
         prefs.end();
-        Serial.printf("[WIFI-MGR] Zugangsdaten fuer '%s' im NVS gespeichert.\n", ssid.c_str());
+        Serial.printf("[WIFI-MGR] Credentials for '%s' saved to NVS.\n", ssid.c_str());
     }
 
     void clearCredentials() {
         prefs.begin("wifi_config", false);
         prefs.clear();
         prefs.end();
-        Serial.println("[WIFI-MGR] Zugangsdaten aus NVS geloescht.");
+        Serial.println("[WIFI-MGR] Credentials deleted from NVS.");
     }
 
     bool connectSTA(const String &ssid, const String &pass, uint32_t timeoutMs = 15000) {
@@ -63,7 +63,7 @@ public:
         Candidate candidates[3] = {};
         uint8_t candidateCount = 0;
 
-        Serial.printf("[WIFI-MGR] Suche staerkste APs fuer '%s'...\n", ssid.c_str());
+        Serial.printf("[WIFI-MGR] Searching for strongest APs for '%s'...\n", ssid.c_str());
         WiFi.mode(WIFI_STA);
         WiFi.disconnect();
         delay(100);
@@ -99,7 +99,7 @@ public:
         unsigned long deadline = millis() + timeoutMs;
         for (uint8_t i = 0; i < candidateCount; ++i) {
             if (millis() >= deadline) break;
-            Serial.printf("[WIFI-MGR] AP %u: Kanal %d, RSSI %d dBm\n",
+            Serial.printf("[WIFI-MGR] AP %u: channel %d, RSSI %d dBm\n",
                           i + 1, candidates[i].channel, candidates[i].rssi);
             WiFi.disconnect();
             WiFi.begin(ssid.c_str(), pass.c_str(), candidates[i].channel, candidates[i].bssid);
@@ -110,7 +110,7 @@ public:
             }
             if (WiFi.status() == WL_CONNECTED) {
                 _isApMode = false;
-                Serial.println("[WIFI-MGR] Verbunden (gezielter Mesh-AP)!");
+                Serial.println("[WIFI-MGR] Connected (targeted mesh AP)!");
                 Serial.printf("[WIFI-MGR] IP: http://%s, RSSI: %d dBm\n",
                               WiFi.localIP().toString().c_str(), WiFi.RSSI());
                 return true;
@@ -118,7 +118,7 @@ public:
         }
 
         if (millis() < deadline) {
-            Serial.println("[WIFI-MGR] Automatische AP-Auswahl als Fallback...");
+            Serial.println("[WIFI-MGR] Falling back to automatic AP selection...");
             WiFi.disconnect();
             WiFi.begin(ssid.c_str(), pass.c_str());
             while (WiFi.status() != WL_CONNECTED && millis() < deadline) {
@@ -128,13 +128,13 @@ public:
 
         if (WiFi.status() == WL_CONNECTED) {
             _isApMode = false;
-            Serial.println("[WIFI-MGR] Verbunden (automatische AP-Auswahl)!");
+            Serial.println("[WIFI-MGR] Connected (automatic AP selection)!");
             Serial.printf("[WIFI-MGR] IP: http://%s, RSSI: %d dBm\n",
                           WiFi.localIP().toString().c_str(), WiFi.RSSI());
             return true;
         }
 
-        Serial.println("[WIFI-MGR] Verbindung fehlerhaft.");
+        Serial.println("[WIFI-MGR] Connection failed.");
         return false;
     }
 
@@ -144,14 +144,14 @@ public:
         WiFi.softAP(_apSSID.c_str(), _apPassword.c_str());
         IPAddress apIP = WiFi.softAPIP();
         Serial.println("\n==========================================");
-        Serial.println("  [WIFI-MGR] Hotspot Gestartet!");
+        Serial.println("  [WIFI-MGR] Hotspot started!");
         Serial.printf("  SSID: %s\n", _apSSID.c_str());
-        Serial.printf("  Passwort: %s\n", _apPassword.c_str());
+        Serial.printf("  Password: %s\n", _apPassword.c_str());
         Serial.printf("  IP:   http://%s\n", apIP.toString().c_str());
         Serial.println("==========================================");
     }
 
-    // Fuehrt die Initialisierung aus
+    // Runs the initialization
     bool initWifi(fs::FS *sdFs = nullptr, const String &fallbackSsid = "", const String &fallbackPass = "") {
         bool resetRequested = sdFs && (sdFs->exists("/reset") || sdFs->exists("/clear"));
         if (!resetRequested) {
@@ -165,20 +165,20 @@ public:
             if (!alreadyProcessed) {
                 clearCredentials();
                 setResetFileProcessed(true);
-                Serial.println("[WIFI-MGR] Reset-Datei erkannt: WLAN-Zugangsdaten werden geloescht.");
+                Serial.println("[WIFI-MGR] Reset file detected: Wi-Fi credentials will be deleted.");
                 startAP();
                 return false;
             }
 
             if (!removed) {
-                Serial.println("[WIFI-MGR] Reset-Datei konnte nicht entfernt werden; WLAN-Daten bleiben erhalten.");
+                Serial.println("[WIFI-MGR] Reset file could not be removed; Wi-Fi credentials are kept.");
             }
         }
 
         String savedSsid, savedPass;
         loadCredentials(savedSsid, savedPass);
 
-        // Falls im NVS nichts ist, aber in config.h ein Fallback steht
+        // If NVS is empty but config.h provides a fallback
         if (savedSsid.length() == 0 && fallbackSsid.length() > 0) {
             savedSsid = fallbackSsid;
             savedPass = fallbackPass;
@@ -190,7 +190,7 @@ public:
             }
         }
 
-        // Falls keine Daten da sind oder Verbindung schlug fehl -> AP starten
+        // If there are no credentials or the connection failed -> start AP
         startAP();
         return false;
     }
@@ -200,7 +200,7 @@ public:
     }
 
     String scanNetworksJson() {
-        Serial.println("[WIFI-MGR] Starte WLAN Scan...");
+        Serial.println("[WIFI-MGR] Starting Wi-Fi scan...");
         int n = WiFi.scanNetworks();
         String json = "[";
         for (int i = 0; i < n; ++i) {
