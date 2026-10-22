@@ -931,6 +931,9 @@ void handleMqttStatus() {
 }
 
 void setup() {
+    // Without a connected terminal the native USB serial keeps only 256 bytes; a larger buffer preserves the
+    // boot log until the monitor reconnects after the reset (must be called before begin())
+    Serial.setTxBufferSize(8192);
     Serial.begin(115200);
     // Wait briefly until the native USB-CDC port is connected
     unsigned long startMs = millis();
