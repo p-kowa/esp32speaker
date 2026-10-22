@@ -173,13 +173,6 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: nicht gesetzt";
 #define T_SETUP_WAV_HTTP_HINT "Nur http:// wird unterstützt. Verwende die IP-Adresse des Whisper-Servers, nicht localhost."
 #define T_SETUP_HTTP_URL_REQUIRED "Bitte eine HTTP-URL beginnend mit http:// eingeben."
 #define T_SETUP_SAVE_FAILED_PREFIX "Speichern fehlgeschlagen: "
-#define T_SD_TRAINING_HEADING "Trainingsaufnahmen"
-#define T_SD_LOADING_TRAINING "Aufnahmen werden geladen ..."
-#define T_SD_TRAINING_UNREACHABLE "Trainingsliste nicht erreichbar"
-#define T_SD_NO_TRAINING "Keine Trainingsaufnahmen vorhanden."
-#define T_SD_COUNTS_PREFIX ""
-#define T_SD_COUNTS_MID " Audiodatei(en), "
-#define T_SD_COUNTS_SUFFIX " Trainingsaufnahme(n)."
 
 #define T_IDX_OPTIONS "Optionen"
 #define T_IDX_NAV_ALARM "⏰ Wecker"
