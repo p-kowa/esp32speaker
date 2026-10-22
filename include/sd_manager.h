@@ -64,9 +64,9 @@ public:
         SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
         mounted = SD.begin(SD_CS, SPI, 20000000);
         if (mounted) {
-            Serial.printf("[SD] Karte bereit, Typ=%d, Groesse=%llu MB\n", (int)SD.cardType(), SD.cardSize() / (1024ULL * 1024ULL));
+            Serial.printf("[SD] Card ready, type=%d, size=%llu MB\n", (int)SD.cardType(), SD.cardSize() / (1024ULL * 1024ULL));
         } else {
-            Serial.println("[SD] Keine Karte gefunden oder Initialisierung fehlgeschlagen.");
+            Serial.println("[SD] No card found or initialization failed.");
         }
         return mounted;
     }

@@ -30,9 +30,9 @@ private:
 public:
     void begin() {
         loadSettings();
-        // CET-1CEST,M3.5.0,M10.5.0/3 = Mitteleuropaeische Zeit mit Sommer-/Winterzeit
+        // CET-1CEST,M3.5.0,M10.5.0/3 = Central European Time with daylight saving time
         configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org", "time.nist.gov");
-        Serial.println("[ALARM] NTP Zeitsynchronisation gestartet (Mitteleuropa CET/CEST).");
+        Serial.println("[ALARM] NTP time synchronization started (Central Europe CET/CEST).");
     }
 
     void loadSettings() {
@@ -61,7 +61,7 @@ public:
         prefs.putInt("vol", _volume);
         prefs.end();
 
-        Serial.printf("[ALARM] Einstellungen gespeichert: %02d:%02d, Aktiv: %s, Vol: %d\n",
+        Serial.printf("[ALARM] Settings saved: %02d:%02d, enabled: %s, vol: %d\n",
                       _hour, _minute, _enabled ? "JA" : "NEIN", _volume);
     }
 
@@ -74,7 +74,7 @@ public:
         prefs.end();
     }
 
-    // Einzel-Setter für granulare MQTT-Entities (ändern jeweils nur ein Feld, Rest bleibt erhalten)
+    // Single setters for granular MQTT entities (each changes only one field, the rest is kept)
     void setEnabled(bool enabled) {
         _enabled = enabled;
         prefs.begin("alarm_config", false);
@@ -122,7 +122,7 @@ public:
         time_t now = time(nullptr);
         struct tm timeinfo;
         if (!localtime_r(&now, &timeinfo)) return false;
-        return timeinfo.tm_year > 120; // Jahr > 2020 bedeutet NTP ist synchronisiert
+        return timeinfo.tm_year > 120; // year > 2020 means NTP is synchronized
     }
 
     String getCurrentTimeStr() const {
@@ -145,7 +145,7 @@ public:
     const String &getRadioName() const { return _radioName; }
     const String &getRadioUrl() const { return _radioUrl; }
 
-    // Prueft in loop(), ob Weckzeit erreicht ist
+    // Checks in loop() whether the alarm time has been reached
     bool checkAlarmTrigger() {
         if (!_enabled) {
             _triggeredThisMinute = false;
@@ -161,7 +161,7 @@ public:
         if (timeinfo.tm_hour == _hour && timeinfo.tm_min == _minute) {
             if (!_triggeredThisMinute) {
                 _triggeredThisMinute = true;
-                Serial.printf("[ALARM] WECKER AUSSGELÖST um %02d:%02d Uhr!\n", _hour, _minute);
+                Serial.printf("[ALARM] ALARM TRIGGERED at %02d:%02d!\n", _hour, _minute);
                 return true;
             }
         } else {
