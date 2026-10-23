@@ -1,152 +1,291 @@
 # ESP32 Speaker
 
-Internet-Radio und SD-Audio-Player auf Basis eines ESP32-S3 mit Arduino/PlatformIO. Das Projekt kann ueber eine Weboberflaeche, MQTT und Home Assistant gesteuert werden.
+ESP32-S3 internet radio, MicroSD audio player and wake word receiver built with
+PlatformIO, Arduino and ESP-IDF. Control playback through the web interface,
+MQTT or Home Assistant. Play URL-based announcements and send speech recorded
+after wake word detection to an external service.
 
-## Funktionen
+## Features
 
-- Internet-Radio ueber gespeicherte M3U-Senderlisten
-- Senderauswahl und Wiedergabe ueber MQTT
-- Audioausgabe ueber MAX98357A-I2S-Verstaerker
-- Wiedergabe von MP3-, WAV-, AAC- und FLAC-Dateien von einer Micro-SD-Karte
-- SD-Dateien werden beim Start erkannt und als Home-Assistant-Auswahl angeboten
-- Wecker mit:
-  - Aktivierung und Deaktivierung
-  - Uhrzeit
-  - eigener Lautstaerke
-  - Quelle Radio oder SD
-  - auswaehlbarer SD-Datei
-- MQTT Home Assistant Discovery
-- WLAN-Konfiguration ueber Weboberflaeche
-- Persistente Einstellungen im ESP32-NVS
-- Eindeutige MQTT-Topics pro Geraet ueber die Chip-ID als Standard
+- Internet radio with M3U import, station search and favorites.
+- MAX98357A I2S speaker output.
+- MicroSD playback of MP3, WAV, AAC and FLAC files.
+- Web-based audio upload, download, deletion and sequential playback.
+- Alarm with a radio or SD source, separate volume and start/stop test.
+- URL-based announcements with separate volume and restoration of previous
+  playback.
+- MQTT control, availability reporting and Home Assistant discovery.
+- Local microWakeWord inference using an ICS43434 I2S microphone.
+- Post-detection speech capture and WAV upload over MQTT or HTTP POST.
+- German, English and Polish firmware variants.
+- Persistent Wi-Fi, MQTT, alarm and wake word settings.
 
 ## Hardware
 
-| Funktion | ESP32-S3 GPIO |
+The current configuration targets an ESP32-S3 N16R8 board: **16 MB flash and
+8 MB octal PSRAM**, using the ESP32-S3 DevKitC-1 board definition.
+
+| Connection | ESP32-S3 GPIO |
 | --- | ---: |
-| I2S BCLK | 9 |
-| I2S LRC / WS | 7 |
-| I2S DOUT | 8 |
-| SD SCK | 12 |
-| SD MOSI | 11 |
-| SD MISO | 13 |
-| SD CS | 10 |
+| MAX98357A BCLK | 9 |
+| MAX98357A LRC / WS | 7 |
+| MAX98357A DIN (ESP32 DOUT) | 8 |
+| MicroSD SCK | 12 |
+| MicroSD MOSI | 11 |
+| MicroSD MISO | 13 |
+| MicroSD CS | 10 |
+| ICS43434 BCLK | 14 |
+| ICS43434 LRC / WS | 16 |
+| ICS43434 DOUT (ESP32 input) | 21 |
+| Status LED | 15 |
 
-Die Pins koennen in `include/config.h` angepasst werden.
+Connect the ICS43434 L/R pin to GND for the left audio slot. Pin assignments
+and default audio volumes are defined in [include/config.h](include/config.h).
 
-## Voraussetzungen
+Required for radio playback: the ESP32-S3, MAX98357A amplifier, speaker and Wi-Fi.
+A SPI MicroSD reader and card provide local audio and model storage. Wake word
+operation additionally requires the microphone and a compatible model.
+MQTT and Home Assistant are optional.
 
-- PlatformIO in VS Code
-- ESP32-S3 DevKitC-1
-- MAX98357A-I2S-Verstaerker und Lautsprecher
-- Micro-SD-Kartenleser fuer SPI
-- WLAN
-- Optional: MQTT-Broker, zum Beispiel Mosquitto
-- Optional: Home Assistant mit aktivierter MQTT-Integration
+## Build and upload
 
-## Bauen und Flashen
+Install PlatformIO, open this project and select the desired environment under
+**PlatformIO > Project Tasks**.
 
-Projekt in VS Code oeffnen und anschliessend:
+| Language | Environment |
+| --- | --- |
+| German (default) | `esp32-s3-n16r8_DE` |
+| English | `esp32-s3-n16r8_EN` |
+| Polish | `esp32-s3-n16r8_PL` |
 
-```text
-PlatformIO: Build
-PlatformIO: Upload
-PlatformIO: Monitor
-```
-
-Oder in einer PlatformIO-Shell:
+For example, build and upload **only the German version**:
 
 ```powershell
-pio run -e esp32-s3-devkitc-1
-pio run -e esp32-s3-devkitc-1 -t upload
+pio run -e esp32-s3-n16r8_DE -j 2
+pio run -e esp32-s3-n16r8_DE -t upload -j 2
 pio device monitor -b 115200
 ```
 
-## Erste Einrichtung
+Replace the environment name with `_EN` or `_PL` for another language.
+Language is selected at compile time, not by a runtime language menu.
+Plain `pio run` uses the German environment configured in `default_envs`.
 
-1. Firmware flashen.
-2. Mit dem vom ESP32 bereitgestellten WLAN-Access-Point verbinden, falls noch keine WLAN-Konfiguration gespeichert ist.
-3. WLAN ueber die Weboberflaeche konfigurieren.
-4. Unter `/setup` MQTT-Broker, Port, Benutzer, Passwort und optional ein eigenes Topic-Praefix eintragen.
-5. Eine M3U-Senderliste ueber die Weboberflaeche importieren.
-6. SD-Karte mit Audiodateien einlegen und das Geraet neu starten.
+The first build compiles ESP-IDF, Arduino, TFLite Micro and ESP-NN and can take
+a considerable amount of time. `-j 2` limits build concurrency; use `-j 1` only
+if lower resource usage is necessary, at the cost of a longer build.
+Avoid simultaneous builds and do not clean routinely: incremental builds reuse
+existing results. A clean forces a full rebuild of the selected environment.
 
-Die Weboberflaeche ist anschliessend unter der IP-Adresse des ESP32 erreichbar.
+See [platformio.ini](platformio.ini) for dependencies and board settings.
+The current audio library is ESP32-audioI2S 3.0.12. Keep `TF_LITE_STATIC_MEMORY`
+consistent with the TFLite Micro component build because it affects tensor layout.
 
-## Home Assistant
+## Initial setup
 
-Home Assistant muss mit demselben MQTT-Broker verbunden sein. Die Firmware publiziert die Discovery-Konfiguration automatisch unter dem Standard-Prefix `homeassistant`.
+1. Flash the firmware.
+2. If Wi-Fi is not configured or a connection cannot be established, connect to
+   the setup access point:
+   - SSID: `ESP32-Radio-Setup`
+   - Password: `radio-setup`
+3. Open the access-point IP shown in the serial log and configure Wi-Fi.
+4. Open the radio's IP address on your LAN.
+5. Import an M3U list on the main page.
+6. Optionally configure MQTT and speech-upload transport on `/setup`.
+7. For local playback and wake word models, insert a prepared MicroSD card before
+   booting. Restart after replacing the card.
 
-Nach dem MQTT-Verbindungsaufbau wird ein Geraet mit dem Namen `ESP32 Radio (...)` angelegt. Unter diesem Geraet stehen unter anderem folgende Entities zur Verfuegung:
+### Web pages
 
-- Radio Power
-- Radio Lautstaerke
-- Radio Sender
-- Radio Titel
-- Radio Sender Auswahl
-- SD Datei Auswahl
-- Wecker Aktiv
-- Weckzeit
-- Wecker Lautstaerke
-- Wecker Quelle
-- Wecker SD-Datei, wenn abspielbare SD-Dateien vorhanden sind
-
-Die Auswahl `SD Datei Auswahl` startet eine Datei sofort. Die Auswahl `Wecker SD-Datei` legt dagegen die Datei fuer den Wecker fest. Fuer den Wecker muss zusaetzlich `Wecker Quelle` auf `sd` stehen.
-
-Die automatisch erzeugten Entities koennen direkt in Karten verwendet und dem passenden Home-Assistant-Bereich zugeordnet werden, zum Beispiel `Wohnkeller`.
-
-## MQTT
-
-Das Topic-Praefix wird beim Einrichten gespeichert. Ohne eigenes Praefix wird standardmaessig ein Geraetename mit Chip-ID verwendet, damit mehrere Radios im selben MQTT-Netz getrennt bleiben.
-
-Beispiele fuer Befehle:
-
-| Topic | Payload |
+| Path | Purpose |
 | --- | --- |
-| `<base>/set/power` | `ON` oder `OFF` |
-| `<base>/set/volume` | `0` bis `21` |
-| `<base>/set/station_name` | exakter Sendername |
-| `<base>/set/sd_play` | exakter SD-Dateipfad |
-| `<base>/set/alarm_enabled` | `ON` oder `OFF` |
-| `<base>/set/alarm_time` | `HH:MM` |
-| `<base>/set/alarm_volume` | `0` bis `21` |
-| `<base>/set/alarm_source` | `radio` oder `sd` |
-| `<base>/set/alarm_sd_path` | exakter SD-Dateipfad |
-| `<base>/set/m3u` | Inhalt einer M3U-Liste |
+| `/` | Radio, favorites, station import, stream URL and volume controls |
+| `/setup` | Wi-Fi, MQTT and outgoing speech-upload settings |
+| `/alarm` | Alarm time, enable switch, volume and playback test |
+| `/sdcard` | Audio file management and playback |
+| `/wakeword` | Model selection, detection status and model settings |
 
-Zustaende werden unter `<base>/state/...` publiziert. Die Verfuegbarkeit steht unter `<base>/availability`.
+UI and API messages follow the firmware language. Diagnostic log messages are
+English. Native file-picker labels and the system file dialog follow the browser
+or operating-system language.
 
-## Senderlisten
+## Stations and MicroSD audio
 
-Sender werden ueber M3U-Dateien verwaltet. Ein Eintrag sollte beispielsweise so aussehen:
+Import an M3U list through the main page, replacing or appending to the current
+list. For example:
 
 ```text
 #EXTM3U
-#EXTINF:-1,Deutschlandfunk
-https://example.invalid/radio.mp3
+#EXTINF:-1,Example Station
+http://example.invalid/radio.mp3
 ```
 
-Die importierten Sender werden dauerhaft im ESP32 gespeichert.
+Station storage uses the SD card when available, with a fallback of up to
+24 stations in NVS without a card. Up to 50 favorites are supported.
 
-## SD-Dateien
+The SD page supports `.mp3`, `.wav`, `.aac` and `.flac`, with uploads of up to
+20 MiB per file. You can play a file, play all files, download or delete audio,
+and select an alarm sound. The `/wakeword` directory is excluded from normal
+audio-file management to protect models and related files.
 
-Beim Booten wird die SD-Karte rekursiv durchsucht. Unterstuetzt werden:
+The alarm supports a stored radio station or an SD file and synchronizes time
+using NTP with Central European CET/CEST rules. Its test button toggles playback;
+volume changes can be previewed during an alarm, while saving persists settings.
 
-- `.mp3`
-- `.wav`
-- `.aac`
-- `.flac`
+## Announcements and external TTS
 
-Wird die SD-Karte im laufenden Betrieb ausgetauscht, muss das Geraet neu gestartet werden, damit die Dateiliste neu erstellt und per MQTT Discovery veroeffentlicht wird.
+The firmware plays an **audio URL**, not raw text. An external TTS service must
+generate and serve the audio. Piper can run on a separate Linux host or LXC;
+it does not have to run on the Home Assistant machine.
 
-## Projektstruktur
+For a Linux HTTP test:
+
+```bash
+curl --get "http://RADIO_IP/api/announce" \
+  --data-urlencode "url=http://AUDIO_SERVER_IP:8000/message.mp3" \
+  --data-urlencode "volume=15"
+```
+
+`/api/announce` accepts GET or POST form parameters. `url` is required;
+`volume` (or `vol`) is optional and ranges from 0 to 21. Without an override,
+the saved announcement volume is used.
+
+The radio downloads the audio directly, interrupts current playback, and restores
+the saved playback state and volume afterward. A new announcement during an
+existing announcement replaces it without taking another playback snapshot.
+The firmware includes a 10-second inactivity timeout and a five-minute maximum
+announcement duration.
+
+Use a server address reachable **from the radio**, not `localhost`.
+
+### Known short-WAV limitation
+
+With ESP32-audioI2S 3.0.12, short WAV files served over HTTP may connect and parse
+successfully without audible playback. The external Python/Piper workflow used
+with this project works around this by setting the RIFF size and `data` chunk
+size to `0xFFFFFFFF` before serving the generated WAV. Locate the actual `data`
+chunk rather than assuming a fixed 44-byte header.
+
+This is a server-side compatibility workaround, not a patch to the audio library
+or a general requirement for every WAV player. MP3 is an alternative for testing.
+The external Python service is not included in this repository.
+
+## Wake word detection and speech upload
+
+Copy a compatible microWakeWord model and its matching manifest to the SD card:
 
 ```text
-include/    Konfiguration und Manager fuer WLAN, MQTT, Wecker, Sender und SD
-src/        Hauptprogramm
-platformio.ini  PlatformIO-Konfiguration
+/wakeword/name.tflite
+/wakeword/name.json
 ```
 
-## Lizenz
+Use a model with `int8 [1, n, 40]` input and `uint8 [1, 1]` output. Arbitrary
+TFLite speech models are not interchangeable with microWakeWord models.
 
-Noch nicht festgelegt.
+On `/wakeword`, select a model, monitor detection probability and adjust:
+
+- Probability threshold.
+- Sliding-window size for averaging.
+- Silence duration after speech before recording ends.
+
+The manifest supplies `probability_cutoff`, `sliding_window_size` and, when
+present, `tensor_arena_size` and `feature_step_size`. Saving threshold/window
+settings updates the selected model's JSON; the silence setting is stored in NVS.
+
+After detection, the radio pauses playback and records speech at 16 kHz,
+16-bit mono. Capture ends according to speech/silence detection or after a maximum
+of 10 seconds. Recordings without detected speech are discarded. Speech is sent
+as WAV using the transport selected on `/setup`:
+
+| Transport | Configuration | Payload |
+| --- | --- | --- |
+| MQTT | Broker and outgoing WAV topic | Binary WAV, not JSON or Base64 |
+| HTTP POST | Destination URL starting with `http://` | WAV body with `Content-Type: audio/wav` |
+
+The receiver must accept the full WAV payload; configure MQTT message-size limits
+accordingly. The default outgoing topic is `esp32radio/audio/upload`; configure
+distinct topics for multiple radios if the receiving service needs to identify
+the source. HTTP speech upload currently supports plain HTTP, not HTTPS.
+
+An external service must perform speech recognition and any subsequent action.
+The firmware does not perform transcription or model training.
+The previous training-recording UI and backend have been removed; model training
+is performed externally, for example in Google Colab. Normal speech capture after
+wake word detection remains available.
+
+## MQTT
+
+Configure the broker and topic base on `/setup`. On first use, the default base
+includes a chip-derived device ID. Give each radio a distinct base if configuring
+it manually.
+
+| Command topic | Payload |
+| --- | --- |
+| `<base>/set/power` | `ON` or `OFF` |
+| `<base>/set/volume` | `0` to `21` |
+| `<base>/set/station_name` | Exact name of a favorite station |
+| `<base>/set/station_url` | Stream URL |
+| `<base>/set/sd_play` | SD audio path |
+| `<base>/set/announce` | Audio URL or `{"url":"http://host/message.mp3","volume":15}` |
+| `<base>/set/announce_volume` | `0` to `21` |
+| `<base>/set/alarm_enabled` | `ON` or `OFF` |
+| `<base>/set/alarm_time` | `HH:MM` |
+| `<base>/set/alarm_volume` | `0` to `21` |
+| `<base>/set/alarm_source` | `radio` or `sd` |
+| `<base>/set/alarm_sd_path` | SD audio path |
+| `<base>/set/m3u` | M3U list contents |
+
+Playback and alarm states are published under `<base>/state/...`.
+Availability is published under `<base>/availability`.
+Do not retain announcement commands, to avoid replaying them after reconnecting.
+The outgoing microphone WAV topic is configured separately from this command base.
+
+## Home Assistant
+
+Connect Home Assistant to the same MQTT broker. The radio publishes discovery
+configuration under the `homeassistant` prefix and appears as an
+`ESP32 Radio (...)` device.
+
+Discovered entities include radio power, volume, station/title sensors,
+station and SD playback selectors, alarm controls, announcement volume and
+announcement-active status. Names follow the firmware language.
+List-based selectors depend on available station/audio entries.
+Selecting an SD playback entry starts playback; selecting an alarm SD entry
+configures the alarm file instead. Set the alarm source to `sd` to use it.
+
+To announce an existing audio URL from an automation:
+
+```yaml
+action: mqtt.publish
+data:
+  topic: "YOUR_RADIO_BASE/set/announce"
+  payload: '{"url":"http://AUDIO_SERVER_IP:8000/message.mp3","volume":15}'
+  retain: false
+```
+
+This firmware does **not** currently provide a native Home Assistant
+`media_player` entity, direct `tts.speak` support or an ESPHome voice-assistant
+satellite implementation. Native HA TTS would require a compatible media-player
+integration. Piper running in an LXC can separately be exposed to HA through a
+Wyoming service; that alone does not add media-player support to the radio.
+
+## Network access
+
+Use the device and its audio/upload services on a trusted network. The HTTP
+control API has no authentication; do not expose it directly to the internet.
+Use broker authentication and appropriate MQTT permissions where available.
+
+## Project structure
+
+| Path | Contents |
+| --- | --- |
+| [src/](src/) | Main application, microphone, wake word detector and tone generation |
+| [include/](include/) | Configuration, web pages and managers |
+| [include/languages/](include/languages/) | German, English and Polish texts |
+| [components/](components/) | TFLite Micro and ESP-NN components |
+| [platformio.ini](platformio.ini) | Build environments and dependencies |
+| [n16r8_part.csv](n16r8_part.csv) | Flash partition layout |
+
+## License
+
+A project-wide license has not yet been specified. Bundled third-party components
+retain their respective licenses; see their directories.
