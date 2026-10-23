@@ -515,6 +515,12 @@ void handleMqttCommand(const String &topic, const String &payload) {
     }
 }
 
+void handleDeviceIdGet() {
+    char buf[13];
+    snprintf(buf, sizeof(buf), "%012llX", static_cast<unsigned long long>(ESP.getEfuseMac()));
+    server.send(200, "application/json", "{\"device_id\":\"" + String(buf) + "\"}");
+}
+
 // Web server route: main page
 void handleRoot() {
     if (wifiMgr.isApMode()) {
@@ -1332,6 +1338,7 @@ void setup() {
     server.on("/api/alarm/radio", HTTP_POST, handleRadioAlarmSave);
     server.on("/api/alarm/test", HTTP_POST, handleAlarmTest);
     server.on("/api/alarm/volume", HTTP_POST, handleAlarmVolume);
+    server.on("/api/device/id", HTTP_GET, handleDeviceIdGet);
     server.onNotFound([]() { server.send(404, "text/plain", NOT_FOUND); });
     server.begin();
     Serial.println("[HTTP] Web server started on port 80.");
