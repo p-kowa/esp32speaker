@@ -49,6 +49,38 @@ constexpr const char* STATUS_SPEAKING = "Odtwarzanie komunikatu...";
 constexpr const char* STATUS_ALARM_TRIGGERED = "⏰ BUDZIK URUCHOMIONY";
 constexpr const char* STATUS_CUSTOM_STREAM = "Własny strumień";
 constexpr const char* STATUS_RADIO = "Radio";
+constexpr const char* STATUS_SPEECH_CAPTURE = "Nagrywanie mowy";
+constexpr const char* STATUS_RECORDING_SPEECH = "Trwa nagrywanie mowy...";
+constexpr const char* STATUS_SPEECH_COMPLETE = "Nagrywanie mowy zakończone";
+constexpr const char* STATUS_NO_SPEECH = "Nie wykryto mowy";
+constexpr const char* WAKE_ERROR_MICROPHONE = "Mikrofon: ";
+constexpr const char* WAKE_ERROR_NO_SELECTION = "Nie wybrano słowa wybudzającego";
+constexpr const char* WAKE_ERROR_NO_SD = "Brak karty SD";
+constexpr const char* WAKE_ERROR_MODEL_MISSING = "Brak pliku modelu";
+constexpr const char* WAKE_ERROR_MODEL_SIZE = "Nieprawidłowy rozmiar pliku modelu";
+constexpr const char* WAKE_ERROR_MODEL_MEMORY = "Brak pamięci na model";
+constexpr const char* WAKE_ERROR_MODEL_READ = "Nie udało się odczytać pliku modelu";
+constexpr const char* WAKE_ERROR_INVALID_SETTINGS = "Nieprawidłowe ustawienia";
+constexpr const char* WAKE_ERROR_MANIFEST_INVALID = "Brak pliku JSON modelu lub plik jest nieprawidłowy";
+constexpr const char* WAKE_ERROR_SETTINGS_MISSING = "Brak ustawień w pliku JSON modelu";
+constexpr const char* WAKE_ERROR_TEMPORARY_CREATE = "Nie udało się utworzyć tymczasowego pliku JSON";
+constexpr const char* WAKE_ERROR_JSON_WRITE = "Nie udało się zapisać całego pliku JSON";
+constexpr const char* WAKE_ERROR_JSON_BACKUP = "Nie udało się utworzyć kopii oryginalnego pliku JSON";
+constexpr const char* WAKE_ERROR_JSON_ACTIVATE = "Nie udało się aktywować nowego pliku JSON";
+constexpr const char* WAKE_ERROR_SILENCE_SAVE = "Nie udało się zapisać czasu ciszy";
+constexpr const char* WAKE_ERROR_TASK_START = "Nie udało się uruchomić zadania";
+constexpr const char* WAKE_ERROR_MEMORY = "Brak pamięci";
+constexpr const char* WAKE_ERROR_FRONTEND = "Nie udało się zainicjalizować przetwarzania audio";
+constexpr const char* WAKE_ERROR_OPERATIONS = "Nie udało się zarejestrować operacji TFLM";
+constexpr const char* WAKE_ERROR_SCHEMA = "Nieobsługiwany schemat modelu";
+constexpr const char* WAKE_ERROR_ARENA_MEMORY = "Brak pamięci na obszar tensorów";
+constexpr const char* WAKE_ERROR_RESOURCES = "Nie udało się utworzyć zmiennych zasobów";
+constexpr const char* WAKE_ERROR_INTERPRETER_MEMORY = "Brak pamięci na interpreter";
+constexpr const char* WAKE_ERROR_TENSORS = "Nie udało się przydzielić tensorów (tensor_arena_size za mały?)";
+constexpr const char* WAKE_ERROR_INPUT = "Nieprawidłowe wejście modelu (oczekiwano int8 [1, n, 40])";
+constexpr const char* WAKE_ERROR_OUTPUT = "Nieprawidłowe wyjście modelu (oczekiwano uint8 [1, 1])";
+constexpr const char* WAKE_ERROR_EXECUTION = "Wykonanie modelu nie powiodło się";
+constexpr const char* WAKE_ERROR_UNKNOWN = "Nieznany błąd słowa wybudzającego";
 constexpr const char* HA_RADIO_POWER = "Zasilanie radia";
 constexpr const char* HA_RADIO_VOLUME = "Głośność radia";
 constexpr const char* HA_RADIO_STATION = "Stacja radiowa";
@@ -81,14 +113,14 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: nie ustawiono";
 #define T_ALARM_ENABLE "Włącz budzik"
 #define T_ALARM_VOLUME_LABEL "Głośność budzika"
 #define T_ALARM_SAVE_BUTTON "💾 Zapisz ustawienia budzika"
-#define T_ALARM_NEED_STATIONS_MAIN "Najpierw prześlij listę stacji M3U na stronie głównej."
+#define T_ALARM_NEED_STATIONS_MAIN "Najpierw załaduj listę stacji M3U na stronie głównej."
 #define T_ALARM_TEST_HEADING "Test"
 #define T_ALARM_TEST_BUTTON "🔔 Test budzika"
 #define T_ALARM_SAVED_MSG "✅ Ustawienia budzika zapisane!"
 #define T_ALARM_TRIGGERED_MSG "🔔 Sygnał budzika uruchomiony!"
 #define T_ALARM_STOP_TEST_BUTTON "⏹ Zakończ test budzika"
 #define T_ALARM_STOPPED_MSG "⏹ Test budzika zakończony."
-#define T_ALARM_NEED_STATIONS "Najpierw prześlij listę stacji M3U."
+#define T_ALARM_NEED_STATIONS "Najpierw załaduj listę stacji M3U."
 
 #define T_SD_PAGE_TITLE "MicroSD - ESP32 Radio"
 #define T_SD_HEADING "Pliki na karcie microSD"
@@ -96,9 +128,9 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: nie ustawiono";
 #define T_SD_PLAY_ALL "▶ Odtwórz wszystkie"
 #define T_SD_STOP_ALL "■ Zatrzymaj wszystkie"
 #define T_SD_REFRESH "↻ Odśwież"
-#define T_SD_UPLOAD_HEADING "Prześlij dźwięk budzika"
+#define T_SD_UPLOAD_HEADING "Załaduj dźwięk budzika"
 #define T_SD_FILE_ARIA "Wybierz dźwięk budzika"
-#define T_SD_UPLOAD_BUTTON "Prześlij dźwięk budzika"
+#define T_SD_UPLOAD_BUTTON "Załaduj dźwięk budzika"
 #define T_SD_FILES_HEADING "Pliki audio"
 #define T_SD_LOADING_FILES "Ładowanie plików ..."
 #define T_BACK_TO_RADIO "Wróć do radia"
@@ -193,12 +225,12 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: nie ustawiono";
 #define T_IDX_M3U_HEADING "Lista stacji M3U"
 #define T_IDX_M3U_APPEND "Dołącz do istniejącej listy"
 #define T_IDX_M3U_REPLACE "Zastąp istniejącą listę"
-#define T_IDX_M3U_UPLOAD "📂 Prześlij M3U"
+#define T_IDX_M3U_UPLOAD "📂 Załaduj M3U"
 #define T_IDX_CLEAR_ALL "🗑️ Usuń wszystkie stacje"
 #define T_IDX_NO_FAVORITES "Brak ulubionych – oznacz stacje gwiazdką ☆ na liście stacji."
 #define T_IDX_LOAD_ERROR "Błąd ładowania"
 #define T_IDX_NO_MATCHES "Brak wyników."
-#define T_IDX_NO_STATIONS_PREFIX "Brak zapisanych stacji – prześlij listę M3U w sekcji "
+#define T_IDX_NO_STATIONS_PREFIX "Brak zapisanych stacji – załaduj listę M3U w sekcji "
 #define T_IDX_NO_STATIONS_SUFFIX "."
 #define T_IDX_PLAY_TITLE "Odtwórz"
 #define T_IDX_FAV_REMOVE "Usuń z ulubionych"
@@ -225,3 +257,53 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: nie ustawiono";
 #define T_IDX_UNKNOWN "Nieznane"
 #define T_IDX_BADGE_ANNOUNCING "📢 Komunikat"
 #define T_IDX_BADGE_PLAYING "Odtwarzanie"
+
+#define T_IDX_SPEECH_RECORDING "Nagrywanie mowy w toku"
+#define T_IDX_WAKE_WORD_SETTINGS_MISSING "Brak ustawień Wake-Word"
+#define T_IDX_WAKE_WORD_SETTINGS_INVALID "Nieprawidłowe ustawienia Wake-Word"
+#define T_IDX_WAKE_WORD_MODEL_NOT_FOUND "Nie znaleziono modelu Wake-Word"
+#define T_IDX_I2S_MIC_START_FAILED "Nie udało się uruchomić mikrofonu I2S: "
+
+#define T_IDX_SUBTITLE "Odtwarzacz strumieni audio"
+#define T_SETUP_PORT_LABEL "Port"
+#define T_ALARM_STATION_LIST_UNAVAILABLE "Lista stacji niedostępna"
+
+#define T_WW_NAME "Słowo wybudzające"
+#define T_WW_MODELS_INTRO "Modele microWakeWord"
+#define T_WW_FOLDER_INTRO "w folderze"
+#define T_WW_SD_INTRO "na karcie MicroSD."
+#define T_WW_ACTIVE "Aktywne"
+#define T_WW_DETECTION_LABEL "Wykrywanie: "
+#define T_WW_PROBABILITY_LABEL "Prawdopodobieństwo: "
+#define T_WW_DISABLE "Wyłącz słowo wybudzające"
+#define T_WW_LOADING_MODELS "Ładowanie modeli ..."
+#define T_WW_DETECTION_HEADING "Wykrywanie słowa wybudzającego"
+#define T_WW_THRESHOLD "Próg"
+#define T_WW_THRESHOLD_HINT "Im wyższa wartość, tym większa musi być pewność wykrycia słowa wybudzającego."
+#define T_WW_WINDOW_SIZE "Rozmiar okna"
+#define T_WW_WINDOW_HINT "Liczba ocen uwzględnianych przy uśrednianiu."
+#define T_WW_SILENCE_LABEL "Cisza przed końcem wypowiedzi"
+#define T_WW_SILENCE_HINT "Czas ciszy po wypowiedzi, po którym nagrywanie się kończy."
+#define T_WW_SAVE_SETTINGS "Zapisz ustawienia słowa wybudzającego"
+#define T_WW_MISSING_FILE_PREFIX "Brak pliku "
+#define T_WW_MISSING_FILE_SUFFIX ""
+#define T_WW_USE "Użyj"
+#define T_WW_NONE "brak"
+#define T_WW_NO_SD "Nie włożono karty MicroSD."
+#define T_WW_SD_UNAVAILABLE "Karta MicroSD niedostępna."
+#define T_WW_FOLDER_FAILED_PREFIX "Nie udało się utworzyć folderu "
+#define T_WW_FOLDER_FAILED_SUFFIX "."
+#define T_WW_FOLDER_ERROR "Błąd folderu na karcie MicroSD."
+#define T_WW_NO_MODELS_PREFIX "Nie znaleziono modeli. Skopiuj name.tflite i name.json do "
+#define T_WW_LOAD_FAILED "Nie udało się wczytać modeli."
+#define T_WW_SELECT_FAILED "Wybór nie powiódł się"
+#define T_WW_SELECTED_PREFIX "Zapisano słowo wybudzające "
+#define T_WW_SELECTED_SUFFIX "."
+#define T_WW_DISABLED "Słowo wybudzające wyłączone."
+#define T_WW_RUNNING "działa"
+#define T_WW_OFF "wyłączone"
+#define T_WW_DETECTED_LABEL "wykrycia: "
+#define T_WW_DETECTED "Wykryto słowo wybudzające!"
+#define T_WW_STATUS_UNREACHABLE "Wykrywanie: status niedostępny"
+#define T_WW_SETTINGS_SAVED "Zapisano ustawienia i ponownie uruchomiono wykrywanie."
+#define T_WW_SERVER_UNREACHABLE "Serwer niedostępny"

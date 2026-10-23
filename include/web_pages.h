@@ -101,10 +101,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           <a href="/alarm" class="btn-settings">)rawliteral" T_IDX_NAV_ALARM R"rawliteral(</a>
           <a href="/setup" class="btn-settings">)rawliteral" T_IDX_NAV_WIFI R"rawliteral(</a>
           <a href="/sdcard" class="btn-settings">💾 MicroSD</a>
-          <a href="/wakeword" class="btn-settings">🎙️ Wake Word</a>
+          <a href="/wakeword" class="btn-settings">🎙️ )rawliteral" T_WW_NAME R"rawliteral(</a>
         </div>
       </div>
-      <div class="subtitle">Audio Streamer</div>
+      <div class="subtitle">)rawliteral" T_IDX_SUBTITLE R"rawliteral(</div>
       
       <div class="now-playing">
         <div id="statusBadge" class="status-badge">
@@ -590,7 +590,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
         <input type="text" id="mqttHost" placeholder="192.168.10.3">
       </div>
       <div class="form-group">
-        <label for="mqttPort">Port</label>
+        <label for="mqttPort">)rawliteral" T_SETUP_PORT_LABEL R"rawliteral(</label>
         <input type="text" id="mqttPort" value="1883" inputmode="numeric">
       </div>
       <div class="form-group">
@@ -1021,7 +1021,7 @@ const char ALARM_HTML[] PROGMEM = R"rawliteral(
       const stopping = alarmPlaying;
       fetch('/api/alarm/test', { method: 'POST' })
         .then(res => {
-          if (!res.ok) throw new Error('Keine Senderliste');
+          if (!res.ok) throw new Error(')rawliteral" T_ALARM_STATION_LIST_UNAVAILABLE R"rawliteral(');
           showMsg(stopping ? ')rawliteral" T_ALARM_STOPPED_MSG R"rawliteral(' : ')rawliteral" T_ALARM_TRIGGERED_MSG R"rawliteral(', 'success');
           return loadAlarmStatus();
         })
@@ -1219,11 +1219,11 @@ const char SDCARD_HTML[] PROGMEM = R"rawliteral(
 
 const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html lang="de">
+<html lang=")rawliteral" T_HTML_LANG R"rawliteral(">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Wake Word - ESP32 Radio</title>
+  <title>)rawliteral" T_WW_NAME R"rawliteral( - ESP32 Radio</title>
   <style>
     :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#f8fafc; --muted:#94a3b8; --accent:#38bdf8; --ok:#34d399; --bad:#f87171; }
     * { box-sizing:border-box; }
@@ -1255,28 +1255,29 @@ const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
     #detector, #probText { margin-bottom:.5rem; }
     a { color:var(--muted); display:block; text-align:center; margin-top:1rem; text-decoration:none; }
     a:hover { color:var(--accent); }
+    a.nav-link { font-size:1.6rem; }
   </style>
 </head>
 <body>
   <main>
     <section>
-      <h1>🎙️ Wake Word</h1>
-      <p>microWakeWord-Modelle (<code>name.tflite</code> + <code>name.json</code>) im Ordner <code id="folder">/wakeword</code> der MicroSD-Karte.</p>
-      <label class="options-toggle"><input type="checkbox" id="optionsWwToggle"> Optionen</label>
+      <h1>🎙️ )rawliteral" T_WW_NAME R"rawliteral(</h1>
+      <p>)rawliteral" T_WW_MODELS_INTRO R"rawliteral( (<code>name.tflite</code> + <code>name.json</code>) )rawliteral" T_WW_FOLDER_INTRO R"rawliteral( <code id="folder">/wakeword</code> )rawliteral" T_WW_SD_INTRO R"rawliteral(</p>
+      <label class="options-toggle"><input type="checkbox" id="optionsWwToggle"> )rawliteral" T_IDX_OPTIONS R"rawliteral(</label>
       <div id="status" role="status"></div>
-      <div class="current">Aktiv: <span id="current">-</span></div>
-      <div class="meta" id="detector">Erkennung: -</div>
+      <div class="current">)rawliteral" T_WW_ACTIVE R"rawliteral(: <span id="current">-</span></div>
+      <div class="meta" id="detector">)rawliteral" T_WW_DETECTION_LABEL R"rawliteral(-</div>
       <div class="meter"><div id="probFill"></div></div>
-      <div class="meta" id="probText">Wahrscheinlichkeit: -</div>
+      <div class="meta" id="probText">)rawliteral" T_WW_PROBABILITY_LABEL R"rawliteral(-</div>
       <div class="actions">
-        <button class="secondary" id="disableBtn" onclick="select('')">✕ Wake Word deaktivieren</button>
-        <button class="secondary" onclick="load()">↻ Aktualisieren</button>
+        <button class="secondary" id="disableBtn" onclick="select('')">✕ )rawliteral" T_WW_DISABLE R"rawliteral(</button>
+        <button class="secondary" onclick="load()">)rawliteral" T_SD_REFRESH R"rawliteral(</button>
       </div>
     </section>
     <section>
-      <div id="modelList"><div class="empty">Modelle werden geladen ...</div></div>
+      <div id="modelList"><div class="empty">)rawliteral" T_WW_LOADING_MODELS R"rawliteral(</div></div>
     </section>
-    <a href="/">← Zurück zum Radio</a>
+    <a href="/" class="nav-link" title=")rawliteral" T_BACK_TO_RADIO R"rawliteral(" aria-label=")rawliteral" T_BACK_TO_RADIO R"rawliteral(">&larr; 📻</a>
   <section>
   <div class="card advanced-card" id="advancedWwCard">
 <h3 style="
@@ -1284,12 +1285,12 @@ const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
     margin-top: 1rem;
     margin-bottom: 0.6rem;
     color: var(--text-muted);">
-    🎤 Wake Word Erkennung
+    🎤 )rawliteral" T_WW_DETECTION_HEADING R"rawliteral(
 </h3>
 
 <div class="volume-box">
     <div class="volume-label">
-        <label for="probabilityCutoff">Schwellwert</label>
+        <label for="probabilityCutoff">)rawliteral" T_WW_THRESHOLD R"rawliteral(</label>
         <span id="probabilityCutoffValue">0.50</span>
     </div>
     <input
@@ -1300,13 +1301,13 @@ const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
         step="0.05"
         value="0.5">
     <small style="color: var(--text-muted);">
-        Je höher, desto sicherer muss das Wake Word erkannt werden.
+        )rawliteral" T_WW_THRESHOLD_HINT R"rawliteral(
     </small>
 </div>
 
 <div class="volume-box" style="margin-top:0.75rem;">
     <div class="volume-label">
-        <label for="slidingWindowSize">Fenstergröße</label>
+        <label for="slidingWindowSize">)rawliteral" T_WW_WINDOW_SIZE R"rawliteral(</label>
         <span id="slidingWindowSizeValue">5</span>
     </div>
     <input
@@ -1317,14 +1318,14 @@ const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
         step="1"
         value="5">
     <small style="color: var(--text-muted);">
-        Anzahl der Auswertungen für die Mittelung.
+        )rawliteral" T_WW_WINDOW_HINT R"rawliteral(
     </small>
 </div>
 
   <div class="volume-box" style="margin-top:0.75rem;">
     <div class="volume-label">
-      <label for="endOfSpeechSilence">Stille bis Satzende</label>
-      <span id="endOfSpeechSilenceValue">1.000 ms</span>
+      <label for="endOfSpeechSilence">)rawliteral" T_WW_SILENCE_LABEL R"rawliteral(</label>
+      <span id="endOfSpeechSilenceValue">1000 ms</span>
     </div>
     <input
       type="range"
@@ -1334,7 +1335,7 @@ const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
       step="100"
       value="1000">
     <small style="color: var(--text-muted);">
-      Stillezeit nach dem Sprechen, bevor die Aufnahme endet.
+      )rawliteral" T_WW_SILENCE_HINT R"rawliteral(
     </small>
   </div>
 
@@ -1343,7 +1344,7 @@ const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
     class="btn-primary"
     id="saveMicroConfig"
     style="width:100%; margin-top:1rem;">
-    💾 Wake Word Einstellungen speichern
+    💾 )rawliteral" T_WW_SAVE_SETTINGS R"rawliteral(
 </button>
 
 <div id="microConfigMsg"
@@ -1377,15 +1378,15 @@ const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
       meta.className = 'meta';
       const parts = [model.name + '.tflite', Math.round(model.size / 1024) + ' KB'];
       if (model.manifest) {
-        if (model.cutoff) parts.push('Schwelle ' + model.cutoff);
-        if (model.window) parts.push('Fenster ' + model.window);
+        if (model.cutoff) parts.push(')rawliteral" T_WW_THRESHOLD R"rawliteral( ' + model.cutoff);
+        if (model.window) parts.push(')rawliteral" T_WW_WINDOW_SIZE R"rawliteral( ' + model.window);
       } else {
-        parts.push('⚠ ' + model.name + '.json fehlt');
+        parts.push('⚠ )rawliteral" T_WW_MISSING_FILE_PREFIX R"rawliteral(' + model.name + '.json)rawliteral" T_WW_MISSING_FILE_SUFFIX R"rawliteral(');
       }
       meta.textContent = parts.join(' · ');
       info.append(name, meta);
       const use = document.createElement('button');
-      use.textContent = model.name === selected ? 'Aktiv' : 'Verwenden';
+      use.textContent = model.name === selected ? ')rawliteral" T_WW_ACTIVE R"rawliteral(' : ')rawliteral" T_WW_USE R"rawliteral(';
       use.disabled = model.name === selected || !model.manifest;
       use.onclick = () => select(model.name);
       item.append(info, use);
@@ -1395,7 +1396,7 @@ const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
       try {
         const data = await fetch('/api/wakeword/list').then(response => response.json());
         document.getElementById('folder').textContent = data.path;
-        document.getElementById('current').textContent = data.selected || 'keins';
+        document.getElementById('current').textContent = data.selected || ')rawliteral" T_WW_NONE R"rawliteral(';
         document.getElementById('disableBtn').disabled = !data.selected;
         endOfSpeechSilence.value = data.end_of_speech_silence_ms ?? 1000;
         updateWakeWordStatus();
@@ -1405,19 +1406,19 @@ const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
           if (selectedModel.window !== '') slidingWindowSize.value = selectedModel.window;
           updateWakeWordStatus();
         }
-        if (!data.sd) { empty('Keine MicroSD-Karte eingelegt.'); message('MicroSD-Karte nicht verfügbar.', false); return; }
-        if (!data.folder) { empty('Ordner ' + data.path + ' konnte nicht angelegt werden.'); message('Ordnerfehler auf der MicroSD-Karte.', false); return; }
-        if (!data.models.length) { empty('Keine Modelle gefunden. Kopiere name.tflite und name.json nach ' + data.path + '.'); status.className = ''; return; }
+        if (!data.sd) { empty(')rawliteral" T_WW_NO_SD R"rawliteral('); message(')rawliteral" T_WW_SD_UNAVAILABLE R"rawliteral(', false); return; }
+        if (!data.folder) { empty(')rawliteral" T_WW_FOLDER_FAILED_PREFIX R"rawliteral(' + data.path + ')rawliteral" T_WW_FOLDER_FAILED_SUFFIX R"rawliteral('); message(')rawliteral" T_WW_FOLDER_ERROR R"rawliteral(', false); return; }
+        if (!data.models.length) { empty(')rawliteral" T_WW_NO_MODELS_PREFIX R"rawliteral(' + data.path + '.'); status.className = ''; return; }
         list.replaceChildren(...data.models.map(model => row(model, data.selected)));
         status.className = '';
-      } catch (error) { empty('Modelle konnten nicht geladen werden.'); message(error.message, false); }
+      } catch (error) { empty(')rawliteral" T_WW_LOAD_FAILED R"rawliteral('); message(error.message, false); }
     }
     async function select(name) {
       try {
         const response = await fetch('/api/wakeword/select', { method:'POST', body:new URLSearchParams({ name }) });
         const text = await response.text();
-        if (!response.ok) throw new Error(text || 'Auswahl fehlgeschlagen');
-        message(name ? 'Wake Word "' + name + '" gespeichert.' : 'Wake Word deaktiviert.', true);
+        if (!response.ok) throw new Error(text || ')rawliteral" T_WW_SELECT_FAILED R"rawliteral(');
+        message(name ? ')rawliteral" T_WW_SELECTED_PREFIX R"rawliteral("' + name + '")rawliteral" T_WW_SELECTED_SUFFIX R"rawliteral(' : ')rawliteral" T_WW_DISABLED R"rawliteral(', true);
         load();
       } catch (error) { message(error.message, false); }
     }
@@ -1426,17 +1427,17 @@ const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
       try {
         const s = await fetch('/api/wakeword/status').then(response => response.json());
         const detector = document.getElementById('detector');
-        detector.textContent = 'Erkennung: ' + (s.running ? 'läuft' : 'aus') + (s.error ? ' – ' + s.error : '') + ' · erkannt: ' + s.detections;
+        detector.textContent = ')rawliteral" T_WW_DETECTION_LABEL R"rawliteral(' + (s.running ? ')rawliteral" T_WW_RUNNING R"rawliteral(' : ')rawliteral" T_WW_OFF R"rawliteral(') + (s.error ? ' – ' + s.error : '') + ' · )rawliteral" T_WW_DETECTED_LABEL R"rawliteral(' + s.detections;
         const fill = document.getElementById('probFill');
         fill.style.width = Math.round(s.peak * 100) + '%';
-        document.getElementById('probText').textContent = 'Wahrscheinlichkeit: ' + s.peak.toFixed(2);
+        document.getElementById('probText').textContent = ')rawliteral" T_WW_PROBABILITY_LABEL R"rawliteral(' + s.peak.toFixed(2);
         if (lastDetections !== null && s.detections > lastDetections) {
           fill.classList.add('hit');
-          message('Wake Word erkannt!', true);
+          message(')rawliteral" T_WW_DETECTED R"rawliteral(', true);
           setTimeout(() => fill.classList.remove('hit'), 1500);
         }
         lastDetections = s.detections;
-      } catch (error) { document.getElementById('detector').textContent = 'Erkennung: Status nicht erreichbar'; }
+      } catch (error) { document.getElementById('detector').textContent = ')rawliteral" T_WW_STATUS_UNREACHABLE R"rawliteral('; }
     }
     setInterval(pollStatus, 500);
 	const optionsToggle =
@@ -1486,7 +1487,7 @@ function updateWakeWordStatus() {
     slidingWindowSizeValue.textContent =
         slidingWindowSize.value;
     endOfSpeechSilenceValue.textContent =
-      Number(endOfSpeechSilence.value).toLocaleString('de-DE') + ' ms';
+      Number(endOfSpeechSilence.value).toLocaleString(document.documentElement.lang) + ' ms';
 }
 
 probabilityCutoff.addEventListener(
@@ -1530,8 +1531,8 @@ document
 
           const result = await response.text();
           document.getElementById('microConfigMsg').textContent = response.ok
-            ? 'Einstellungen gespeichert und Erkennung neu gestartet.'
-            : 'Speichern fehlgeschlagen: ' + result;
+            ? ')rawliteral" T_WW_SETTINGS_SAVED R"rawliteral('
+            : ')rawliteral" T_SETUP_SAVE_FAILED_PREFIX R"rawliteral(' + result;
           if (response.ok) load();
 
         } catch {
@@ -1539,7 +1540,7 @@ document
             document
                 .getElementById('microConfigMsg')
                 .textContent =
-                    '❌ Server nicht erreichbar';
+                    '❌ )rawliteral" T_WW_SERVER_UNREACHABLE R"rawliteral(';
         }
 });
     load();

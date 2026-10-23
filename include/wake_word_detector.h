@@ -3,10 +3,11 @@
 #include <stdint.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include "wake_word_error.h"
 
 class MicManager;
 
-// microWakeWord-Erkennung (TFLite Micro) in eigenem Task, liest PCM ueber MicManager
+// Runs microWakeWord detection (TFLite Micro) in its own task, reads PCM via MicManager
 class WakeWordDetector {
 public:
     struct Settings {
@@ -17,12 +18,13 @@ public:
         uint16_t endOfSpeechSilenceMs = 1000;
     };
 
-    // model: 16-Byte-ausgerichteter Puffer (heap_caps), geht in den Besitz des Detektors ueber
+    // model: 16-Byte-aligned buffer (heap_caps), ownership is transferred to the detector
     bool begin(MicManager *mic, uint8_t *model, const Settings &settings);
     void end();
 
     bool isRunning() const { return task_ != nullptr; }
-    const char *error() const { return error_; }
+    const char *error() const { return wakeWordErrorEnglish(error_); }
+    WakeWordError errorCode() const { return error_; }
     bool takeDetection();
     void startRecording();
     bool recordingComplete() const { return recordingComplete_; }
@@ -56,7 +58,7 @@ private:
     volatile uint32_t detections_ = 0;
     portMUX_TYPE mux_ = portMUX_INITIALIZER_UNLOCKED;
     float peak_ = 0.0f;
-    const char *error_ = "";
+    WakeWordError error_ = WakeWordError::None;
 };
 
 extern WakeWordDetector wakeDetector;

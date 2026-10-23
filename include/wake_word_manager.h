@@ -5,7 +5,7 @@
 #include <esp_heap_caps.h>
 #include "wake_word_detector.h"
 
-// Verwaltet microWakeWord-Modelle (*.tflite + gleichnamiges *.json) im SD-Ordner /wakeword
+// Manages microWakeWord models (*.tflite + corresponding *.json) in the SD folder /wakeword
 class WakeWordManager {
 public:
     static constexpr const char *FOLDER = "/wakeword";
@@ -17,8 +17,8 @@ public:
         endOfSpeechSilenceMs_ = prefs_.getUShort("silence_ms", 1000);
         prefs_.end();
         ensureFolder();
-        Serial.printf("[WAKE] Ordner %s: %s, Auswahl: %s\n", FOLDER,
-                      folderReady_ ? "bereit" : "nicht verfuegbar",
+        Serial.printf("[WAKE] Folder %s: %s, Selected: %s\n", FOLDER,
+                      folderReady_ ? "ready" : "not available",
                       selected_.isEmpty() ? "-" : selected_.c_str());
     }
 
@@ -35,23 +35,25 @@ public:
         prefs_.begin("wakeword", false);
         prefs_.putString("model", selected_);
         prefs_.end();
-        Serial.printf("[WAKE] Modell gewaehlt: %s\n", selected_.isEmpty() ? "-" : selected_.c_str());
+        Serial.printf("[WAKE] Model selected: %s\n", selected_.isEmpty() ? "-" : selected_.c_str());
         return true;
     }
 
-    // Laedt das gewaehlte Modell (16-Byte-ausgerichtet, PSRAM) und die Parameter aus der .json
-    bool loadSelected(uint8_t *&model, WakeWordDetector::Settings &settings, String &error) {
+    // Loads the selected model (16-byte aligned, PSRAM)
+    // and its parameters from the .json file.
+    bool loadSelected(uint8_t *&model, WakeWordDetector::Settings &settings, WakeWordError &error) {
+        error = WakeWordError::None;
         model = nullptr;
-        if (selected_.isEmpty()) { error = "Kein Wake Word gewaehlt"; return false; }
-        if (!fs_) { error = "Keine SD-Karte"; return false; }
+        if (selected_.isEmpty()) { error = WakeWordError::NoSelection; return false; }
+        if (!fs_) { error = WakeWordError::NoSd; return false; }
 
         File file = fs_->open(modelPath(selected_));
-        if (!file || file.isDirectory()) { error = "Modelldatei fehlt"; return false; }
+        if (!file || file.isDirectory()) { error = WakeWordError::ModelMissing; return false; }
         const size_t size = file.size();
-        if (size == 0 || size > MAX_MODEL_SIZE) { file.close(); error = "Modelldatei hat ungueltige Groesse"; return false; }
+        if (size == 0 || size > MAX_MODEL_SIZE) { file.close(); error = WakeWordError::ModelSize; return false; }
 
         model = static_cast<uint8_t *>(heap_caps_aligned_alloc(16, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-        if (!model) { file.close(); error = "Kein Speicher fuer Modell"; return false; }
+        if (!model) { file.close(); error = WakeWordError::ModelMemory; return false; }
         size_t offset = 0;
         while (offset < size) {
             const int got = file.read(model + offset, size - offset);
@@ -62,7 +64,7 @@ public:
         if (offset != size) {
             heap_caps_free(model);
             model = nullptr;
-            error = "Modelldatei konnte nicht gelesen werden";
+            error = WakeWordError::ModelRead;
             return false;
         }
 
@@ -76,25 +78,26 @@ public:
         if (arena.length()) settings.tensorArenaSize = constrain(arena.toInt(), 8000, 512000);
         if (step.length()) settings.featureStepMs = constrain(step.toInt(), 1, 40);
         settings.endOfSpeechSilenceMs = endOfSpeechSilenceMs_;
-        Serial.printf("[WAKE] Modell %s geladen (%u Bytes)\n", selected_.c_str(), (unsigned)size);
+        Serial.printf("[WAKE] Model %s loaded (%u bytes)\n", selected_.c_str(), (unsigned)size);
         return true;
     }
 
-    bool saveSelectedSettings(float cutoff, int window, uint16_t endOfSpeechSilenceMs, String &error) {
-        if (selected_.isEmpty()) { error = "Kein Wake Word gewaehlt"; return false; }
-        if (!fs_) { error = "Keine SD-Karte"; return false; }
+    bool saveSelectedSettings(float cutoff, int window, uint16_t endOfSpeechSilenceMs, WakeWordError &error) {
+        error = WakeWordError::None;
+        if (selected_.isEmpty()) { error = WakeWordError::NoSelection; return false; }
+        if (!fs_) { error = WakeWordError::NoSd; return false; }
         if (!isfinite(cutoff) || cutoff < 0.0f || cutoff > 1.0f || window < 1 || window > 32 ||
             endOfSpeechSilenceMs > 3000 || endOfSpeechSilenceMs % 100 != 0) {
-            error = "Ungueltige Einstellungen";
+            error = WakeWordError::InvalidSettings;
             return false;
         }
 
         const String path = manifestPath(selected_);
         String manifest = readManifest(selected_);
-        if (manifest.isEmpty()) { error = "Modell-JSON fehlt oder ist ungueltig"; return false; }
+        if (manifest.isEmpty()) { error = WakeWordError::ManifestInvalid; return false; }
         if (!replaceNumberField(manifest, "probability_cutoff", String(cutoff, 2)) ||
             !replaceNumberField(manifest, "sliding_window_size", String(window))) {
-            error = "Einstellungen fehlen in der Modell-JSON";
+            error = WakeWordError::SettingsMissing;
             return false;
         }
 
@@ -104,24 +107,24 @@ public:
         if (fs_->exists(backupPath)) fs_->remove(backupPath);
 
         File temporary = fs_->open(temporaryPath, "w");
-        if (!temporary) { error = "Temporaere JSON konnte nicht erstellt werden"; return false; }
+        if (!temporary) { error = WakeWordError::TemporaryCreate; return false; }
         const size_t written = temporary.write(reinterpret_cast<const uint8_t *>(manifest.c_str()), manifest.length());
         temporary.close();
         if (written != manifest.length()) {
             fs_->remove(temporaryPath);
-            error = "JSON konnte nicht vollstaendig geschrieben werden";
+            error = WakeWordError::JsonWrite;
             return false;
         }
 
         if (!fs_->rename(path, backupPath)) {
             fs_->remove(temporaryPath);
-            error = "Original-JSON konnte nicht gesichert werden";
+            error = WakeWordError::JsonBackup;
             return false;
         }
         if (!fs_->rename(temporaryPath, path)) {
             fs_->rename(backupPath, path);
             fs_->remove(temporaryPath);
-            error = "Neue JSON konnte nicht aktiviert werden";
+            error = WakeWordError::JsonActivate;
             return false;
         }
         fs_->remove(backupPath);
@@ -129,12 +132,12 @@ public:
         const size_t saved = prefs_.putUShort("silence_ms", endOfSpeechSilenceMs);
         prefs_.end();
         if (saved != sizeof(endOfSpeechSilenceMs)) {
-            error = "Stillezeit konnte nicht gespeichert werden";
+            error = WakeWordError::SilenceSave;
             return false;
         }
         endOfSpeechSilenceMs_ = endOfSpeechSilenceMs;
-        Serial.printf("[WAKE] Einstellungen fuer %s gespeichert: Schwelle %.2f, Fenster %d\n",
-                      selected_.c_str(), cutoff, window);
+        Serial.printf("[WAKE] Settings saved for %s: Threshold %.2f, Window %d\n",
+              selected_.c_str(), cutoff, window);
         return true;
     }
 
@@ -189,7 +192,7 @@ private:
         folderReady_ = false;
         if (!fs_) return;
         if (!fs_->exists(FOLDER) && fs_->mkdir(FOLDER)) {
-            Serial.printf("[WAKE] Ordner %s angelegt.\n", FOLDER);
+            Serial.printf("[WAKE] Created folder %s.\n", FOLDER);
         }
         File dir = fs_->open(FOLDER);
         folderReady_ = dir && dir.isDirectory();
@@ -205,7 +208,8 @@ private:
         return slash >= 0 ? value.substring(slash + 1) : value;
     }
 
-    // Nur einfache Dateinamen zulassen, damit kein Zugriff ausserhalb von /wakeword moeglich ist
+    // Only allow simple filenames to prevent access outside of /wakeword
+    
     static bool isValidName(const String &name) {
         if (name.isEmpty() || name.length() > 64 || name[0] == '.') return false;
         for (size_t i = 0; i < name.length(); ++i) {

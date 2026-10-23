@@ -1,4 +1,4 @@
-// TFLM-Header vor Arduino.h einbinden, damit Arduino-Makros sie nicht stoeren
+// Include TFLM headers before Arduino.h to avoid interference from Arduino macros
 #include "tensorflow/lite/micro/micro_allocator.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
@@ -23,9 +23,9 @@ constexpr size_t MAX_SLIDING_WINDOW = 32;
 constexpr size_t MAX_RECORDING_SECONDS = 10;
 constexpr size_t MAX_RECORDING_SAMPLES = MicManager::SAMPLE_RATE * MAX_RECORDING_SECONDS;
 constexpr float SPEECH_GATE_DBFS = -45.0f;
-// Reaktionszeit nach dem Wake Word, bevor die Stille-Zeit ohne Sprache zaehlt
+// Response grace period after the wake word before silence without speech starts counting
 constexpr uint32_t NO_SPEECH_GRACE_MS = 1000;
-// Nach Start/Erkennung ~0,74 s ignorieren, bis der Modellzustand eingeschwungen ist (wie ESPHome)
+// Ignore ~0.74 s after startup/detection until the model state settles (as in ESPHome)
 constexpr int MIN_SLICES_BEFORE_DETECTION = 74;
 constexpr size_t TASK_STACK = 10240;
 }
@@ -74,10 +74,10 @@ bool WakeWordDetector::begin(MicManager *mic, uint8_t *model, const Settings &se
     recordingReleaseRequested_ = false;
     detections_ = 0;
     peak_ = 0.0f;
-    error_ = "";
+    error_ = WakeWordError::None;
 
     if (!mic_ || !model_ || !setup()) {
-        Serial.printf("[WAKE] Start fehlgeschlagen: %s\n", error_);
+        Serial.printf("[WAKE] Start failed: %s\n", error());
         release();
         return false;
     }
@@ -86,13 +86,13 @@ bool WakeWordDetector::begin(MicManager *mic, uint8_t *model, const Settings &se
     stop_ = false;
     if (xTaskCreatePinnedToCore(taskEntry, "wakeword", TASK_STACK, this, 4, &task_, 0) != pdPASS) {
         task_ = nullptr;
-        error_ = "Task konnte nicht gestartet werden";
+        error_ = WakeWordError::TaskStart;
         mic_->setStreamingEnabled(false);
         release();
         return false;
     }
-    Serial.printf("[WAKE] Erkennung gestartet (Schwelle %.2f, Fenster %u, Stride %u)\n",
-                  settings_.probabilityCutoff, settings_.slidingWindowSize, (unsigned)impl_->stride);
+    Serial.printf("[WAKE] Detection started (Threshold %.2f, Window %u, Stride %u)\n",
+              settings_.probabilityCutoff, settings_.slidingWindowSize, (unsigned)impl_->stride);
     return true;
 }
 
@@ -100,7 +100,7 @@ void WakeWordDetector::end() {
     if (task_) {
         stop_ = true;
         while (task_) vTaskDelay(pdMS_TO_TICKS(10));
-        Serial.println("[WAKE] Erkennung gestoppt.");
+        Serial.println("[WAKE] Detection stopped.");
     }
     if (mic_) mic_->setStreamingEnabled(false);
     release();
@@ -109,7 +109,7 @@ void WakeWordDetector::end() {
 bool WakeWordDetector::setup() {
     void *mem = heap_caps_malloc(sizeof(Impl), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!mem) mem = heap_caps_malloc(sizeof(Impl), MALLOC_CAP_8BIT);
-    if (!mem) { error_ = "Kein Speicher"; return false; }
+    if (!mem) { error_ = WakeWordError::Memory; return false; }
     impl_ = new (mem) Impl();
     Impl &d = *impl_;
 
@@ -129,7 +129,7 @@ bool WakeWordDetector::setup() {
     d.frontendConfig.log_scale.enable_log = 1;
     d.frontendConfig.log_scale.scale_shift = 6;
     if (!FrontendPopulateState(&d.frontendConfig, &d.frontendState, MicManager::SAMPLE_RATE)) {
-        error_ = "Audio-Frontend konnte nicht initialisiert werden";
+        error_ = WakeWordError::Frontend;
         return false;
     }
     d.frontendReady = true;
@@ -144,47 +144,47 @@ bool WakeWordDetector::setup() {
         d.resolver.AddDepthwiseConv2D() != kTfLiteOk || d.resolver.AddAveragePool2D() != kTfLiteOk ||
         d.resolver.AddMaxPool2D() != kTfLiteOk || d.resolver.AddPad() != kTfLiteOk ||
         d.resolver.AddPack() != kTfLiteOk || d.resolver.AddSplitV() != kTfLiteOk) {
-        error_ = "TFLM-Operationen konnten nicht registriert werden";
+        error_ = WakeWordError::Operations;
         return false;
     }
 
     const tflite::Model *model = tflite::GetModel(model_);
     if (model->version() != TFLITE_SCHEMA_VERSION) {
-        error_ = "Modell-Schema wird nicht unterstuetzt";
+        error_ = WakeWordError::Schema;
         return false;
     }
 
     d.arena = static_cast<uint8_t *>(allocPsram(settings_.tensorArenaSize));
     d.varArena = static_cast<uint8_t *>(allocPsram(VARIABLE_ARENA_SIZE));
     if (!d.arena || !d.varArena) {
-        error_ = "Kein Speicher fuer Tensor-Arena";
+        error_ = WakeWordError::ArenaMemory;
         return false;
     }
     d.varAllocator = tflite::MicroAllocator::Create(d.varArena, VARIABLE_ARENA_SIZE);
     d.variables = d.varAllocator ? tflite::MicroResourceVariables::Create(d.varAllocator, 20) : nullptr;
     if (!d.variables) {
-        error_ = "Ressourcen-Variablen konnten nicht angelegt werden";
+        error_ = WakeWordError::Resources;
         return false;
     }
 
     void *interpreterMem = heap_caps_malloc(sizeof(tflite::MicroInterpreter), MALLOC_CAP_8BIT);
-    if (!interpreterMem) { error_ = "Kein Speicher fuer Interpreter"; return false; }
+    if (!interpreterMem) { error_ = WakeWordError::InterpreterMemory; return false; }
     d.interpreter = new (interpreterMem) tflite::MicroInterpreter(model, d.resolver, d.arena, settings_.tensorArenaSize, d.variables);
     if (d.interpreter->AllocateTensors() != kTfLiteOk) {
-        error_ = "Tensoren konnten nicht angelegt werden (tensor_arena_size zu klein?)";
+        error_ = WakeWordError::Tensors;
         return false;
     }
 
     TfLiteTensor *input = d.interpreter->input(0);
     if (input->dims->size != 3 || input->dims->data[0] != 1 || input->dims->data[2] != (int)FEATURE_SIZE ||
         input->type != kTfLiteInt8) {
-        error_ = "Modell-Eingang passt nicht (erwartet int8 [1, n, 40])";
+        error_ = WakeWordError::Input;
         return false;
     }
     TfLiteTensor *output = d.interpreter->output(0);
     if (output->dims->size != 2 || output->dims->data[0] != 1 || output->dims->data[1] != 1 ||
         output->type != kTfLiteUInt8) {
-        error_ = "Modell-Ausgang passt nicht (erwartet uint8 [1, 1])";
+        error_ = WakeWordError::Output;
         return false;
     }
     d.stride = input->dims->data[1];
@@ -238,7 +238,7 @@ void WakeWordDetector::run() {
             recordingHasSpeech_ = d.speechSeen;
             recordingComplete_ = true;
             mic_->setStreamingEnabled(false);
-            Serial.printf("[%s] [WAKE] Sprachaufnahme beendet: Maximaldauer erreicht.\n", logTimestamp().c_str());
+            Serial.printf("[%s] [WAKE] Speech recording stopped: Maximum duration reached.\n", logTimestamp().c_str());
             continue;
         }
 
@@ -258,7 +258,7 @@ void WakeWordDetector::run() {
             d.recordingStartedMs = millis();
             d.silenceStartedMs = 0;
             d.speechSeen = false;
-            Serial.printf("[%s] [WAKE] Sprachaufnahme gestartet (max. 10 s).\n", logTimestamp().c_str());
+            Serial.printf("[%s] [WAKE] Speech recording started (max. 10 s).\n", logTimestamp().c_str());
         }
         if (d.recordingActive) {
             const size_t copyCount = min(stepSamples, MAX_RECORDING_SAMPLES - d.recordingSamples);
@@ -290,9 +290,9 @@ void WakeWordDetector::run() {
                 recordingHasSpeech_ = d.speechSeen;
                 recordingComplete_ = true;
                 mic_->setStreamingEnabled(false);
-                Serial.printf("[%s] [WAKE] Sprachaufnahme beendet: %u ms, %s\n", logTimestamp().c_str(),
+                Serial.printf("[%s] [WAKE] Speech recording stopped: %u ms, %s\n", logTimestamp().c_str(),
                               (unsigned)((d.recordingSamples * 1000) / MicManager::SAMPLE_RATE),
-                              silenceEnded ? "Stille erkannt" : (noSpeech ? "keine Sprache erkannt" : "Maximaldauer erreicht"));
+                              silenceEnded ? "silence detected" : (noSpeech ? "no speech detected" : "maximum duration reached"));
                 continue;
             }
         }
@@ -302,14 +302,14 @@ void WakeWordDetector::run() {
         if (out.size != FEATURE_SIZE) continue;
 
         for (size_t i = 0; i < FEATURE_SIZE; ++i) {
-            // Skalierung wie beim Training: (feature * 256) / (25.6 * 26.0) - 128
+            // Use the same scaling as during training: (feature * 256) / (25.6 * 26.0) - 128
             int32_t value = ((static_cast<int32_t>(out.values[i]) * 256) + 333) / 666 - 128;
             if (value < -128) value = -128;
             if (value > 127) value = 127;
             features[i] = static_cast<int8_t>(value);
         }
         if (!processFeatures(features)) {
-            error_ = "Modell-Ausfuehrung fehlgeschlagen";
+            error_ = WakeWordError::Execution;
             break;
         }
     }

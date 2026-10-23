@@ -3,8 +3,8 @@
 #include <ArduinoJson.h>
 #include <FS.h>
 
-// 16-Bit-PCM, mono
+// 16-bit PCM, mono
 void makeWavHeader(uint8_t header[44], uint32_t sampleCount, uint32_t sampleRate);
 
-// Erwartet ein Array aus {"freq": Hz, "duration": ms, "type": "sine|square|triangle|sawtooth"}; freq 0 = Pause
+// Expects an array of {"freq": Hz, "duration": ms, "type": "sine|square|triangle|sawtooth"}; freq 0 = silence
 bool writeToneWav(fs::FS &filesystem, const char *path, JsonArrayConst tones, String &error);

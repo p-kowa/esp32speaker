@@ -3,7 +3,7 @@
 #include <sys/time.h>
 #include <time.h>
 
-// Uhrzeit mit Millisekunden fuer Log-Zeilen; vor dem NTP-Abgleich Millisekunden seit Start.
+// Time with milliseconds for log lines; milliseconds since startup before NTP synchronization.
 inline String logTimestamp() {
     struct timeval tv;
     gettimeofday(&tv, nullptr);

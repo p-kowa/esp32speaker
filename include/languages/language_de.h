@@ -49,6 +49,38 @@ constexpr const char* STATUS_SPEAKING = "Sprachausgabe...";
 constexpr const char* STATUS_ALARM_TRIGGERED = "⏰ WECKER AUSGELÖST";
 constexpr const char* STATUS_CUSTOM_STREAM = "Eigener Stream";
 constexpr const char* STATUS_RADIO = "Radio";
+constexpr const char* STATUS_SPEECH_CAPTURE = "Sprachaufnahme";
+constexpr const char* STATUS_RECORDING_SPEECH = "Sprache wird aufgenommen...";
+constexpr const char* STATUS_SPEECH_COMPLETE = "Sprachaufnahme abgeschlossen";
+constexpr const char* STATUS_NO_SPEECH = "Keine Sprache erkannt";
+constexpr const char* WAKE_ERROR_MICROPHONE = "Mikrofon: ";
+constexpr const char* WAKE_ERROR_NO_SELECTION = "Kein Wake Word gewählt";
+constexpr const char* WAKE_ERROR_NO_SD = "Keine SD-Karte";
+constexpr const char* WAKE_ERROR_MODEL_MISSING = "Modelldatei fehlt";
+constexpr const char* WAKE_ERROR_MODEL_SIZE = "Modelldatei hat ungültige Größe";
+constexpr const char* WAKE_ERROR_MODEL_MEMORY = "Kein Speicher für Modell";
+constexpr const char* WAKE_ERROR_MODEL_READ = "Modelldatei konnte nicht gelesen werden";
+constexpr const char* WAKE_ERROR_INVALID_SETTINGS = "Ungültige Einstellungen";
+constexpr const char* WAKE_ERROR_MANIFEST_INVALID = "Modell-JSON fehlt oder ist ungültig";
+constexpr const char* WAKE_ERROR_SETTINGS_MISSING = "Einstellungen fehlen in der Modell-JSON";
+constexpr const char* WAKE_ERROR_TEMPORARY_CREATE = "Temporäre JSON konnte nicht erstellt werden";
+constexpr const char* WAKE_ERROR_JSON_WRITE = "JSON konnte nicht vollständig geschrieben werden";
+constexpr const char* WAKE_ERROR_JSON_BACKUP = "Original-JSON konnte nicht gesichert werden";
+constexpr const char* WAKE_ERROR_JSON_ACTIVATE = "Neue JSON konnte nicht aktiviert werden";
+constexpr const char* WAKE_ERROR_SILENCE_SAVE = "Stillezeit konnte nicht gespeichert werden";
+constexpr const char* WAKE_ERROR_TASK_START = "Task konnte nicht gestartet werden";
+constexpr const char* WAKE_ERROR_MEMORY = "Kein Speicher";
+constexpr const char* WAKE_ERROR_FRONTEND = "Audio-Frontend konnte nicht initialisiert werden";
+constexpr const char* WAKE_ERROR_OPERATIONS = "TFLM-Operationen konnten nicht registriert werden";
+constexpr const char* WAKE_ERROR_SCHEMA = "Modell-Schema wird nicht unterstützt";
+constexpr const char* WAKE_ERROR_ARENA_MEMORY = "Kein Speicher für Tensor-Arena";
+constexpr const char* WAKE_ERROR_RESOURCES = "Ressourcen-Variablen konnten nicht angelegt werden";
+constexpr const char* WAKE_ERROR_INTERPRETER_MEMORY = "Kein Speicher für Interpreter";
+constexpr const char* WAKE_ERROR_TENSORS = "Tensoren konnten nicht angelegt werden (tensor_arena_size zu klein?)";
+constexpr const char* WAKE_ERROR_INPUT = "Modell-Eingang passt nicht (erwartet int8 [1, n, 40])";
+constexpr const char* WAKE_ERROR_OUTPUT = "Modell-Ausgang passt nicht (erwartet uint8 [1, 1])";
+constexpr const char* WAKE_ERROR_EXECUTION = "Modell-Ausführung fehlgeschlagen";
+constexpr const char* WAKE_ERROR_UNKNOWN = "Unbekannter Wake-Word-Fehler";
 constexpr const char* HA_RADIO_POWER = "Radio Power";
 constexpr const char* HA_RADIO_VOLUME = "Radio Lautstärke";
 constexpr const char* HA_RADIO_STATION = "Radio Sender";
@@ -225,3 +257,53 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: nicht gesetzt";
 #define T_IDX_UNKNOWN "Unbekannt"
 #define T_IDX_BADGE_ANNOUNCING "📢 Durchsage"
 #define T_IDX_BADGE_PLAYING "Wiedergabe"
+
+#define T_IDX_SPEECH_RECORDING "Sprachaufnahme läuft"
+#define T_IDX_WAKE_WORD_SETTINGS_MISSING "Wake-Word-Einstellungen fehlen"
+#define T_IDX_WAKE_WORD_SETTINGS_INVALID "Ungueltige Wake-Word-Einstellungen"
+#define T_IDX_WAKE_WORD_MODEL_NOT_FOUND "Modell nicht gefunden"
+#define T_IDX_I2S_MIC_START_FAILED "I2S-Mikrofon konnte nicht gestartet werden: "
+
+#define T_IDX_SUBTITLE "Audio-Streaming"
+#define T_SETUP_PORT_LABEL "Port"
+#define T_ALARM_STATION_LIST_UNAVAILABLE "Senderliste nicht verfügbar"
+
+#define T_WW_NAME "Wake Word"
+#define T_WW_MODELS_INTRO "microWakeWord-Modelle"
+#define T_WW_FOLDER_INTRO "im Ordner"
+#define T_WW_SD_INTRO "der MicroSD-Karte."
+#define T_WW_ACTIVE "Aktiv"
+#define T_WW_DETECTION_LABEL "Erkennung: "
+#define T_WW_PROBABILITY_LABEL "Wahrscheinlichkeit: "
+#define T_WW_DISABLE "Wake Word deaktivieren"
+#define T_WW_LOADING_MODELS "Modelle werden geladen ..."
+#define T_WW_DETECTION_HEADING "Wake-Word-Erkennung"
+#define T_WW_THRESHOLD "Schwellwert"
+#define T_WW_THRESHOLD_HINT "Je höher, desto sicherer muss das Wake Word erkannt werden."
+#define T_WW_WINDOW_SIZE "Fenstergröße"
+#define T_WW_WINDOW_HINT "Anzahl der Auswertungen für die Mittelung."
+#define T_WW_SILENCE_LABEL "Stille bis Satzende"
+#define T_WW_SILENCE_HINT "Stillezeit nach dem Sprechen, bevor die Aufnahme endet."
+#define T_WW_SAVE_SETTINGS "Wake-Word-Einstellungen speichern"
+#define T_WW_MISSING_FILE_PREFIX ""
+#define T_WW_MISSING_FILE_SUFFIX " fehlt"
+#define T_WW_USE "Verwenden"
+#define T_WW_NONE "keins"
+#define T_WW_NO_SD "Keine MicroSD-Karte eingelegt."
+#define T_WW_SD_UNAVAILABLE "MicroSD-Karte nicht verfügbar."
+#define T_WW_FOLDER_FAILED_PREFIX "Ordner "
+#define T_WW_FOLDER_FAILED_SUFFIX " konnte nicht angelegt werden."
+#define T_WW_FOLDER_ERROR "Ordnerfehler auf der MicroSD-Karte."
+#define T_WW_NO_MODELS_PREFIX "Keine Modelle gefunden. Kopiere name.tflite und name.json nach "
+#define T_WW_LOAD_FAILED "Modelle konnten nicht geladen werden."
+#define T_WW_SELECT_FAILED "Auswahl fehlgeschlagen"
+#define T_WW_SELECTED_PREFIX "Wake Word "
+#define T_WW_SELECTED_SUFFIX " gespeichert."
+#define T_WW_DISABLED "Wake Word deaktiviert."
+#define T_WW_RUNNING "läuft"
+#define T_WW_OFF "aus"
+#define T_WW_DETECTED_LABEL "erkannt: "
+#define T_WW_DETECTED "Wake Word erkannt!"
+#define T_WW_STATUS_UNREACHABLE "Erkennung: Status nicht erreichbar"
+#define T_WW_SETTINGS_SAVED "Einstellungen gespeichert und Erkennung neu gestartet."
+#define T_WW_SERVER_UNREACHABLE "Server nicht erreichbar"

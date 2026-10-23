@@ -32,7 +32,8 @@ SdManager sdMgr;
 MicManager mic;
 WakeWordManager wakeWordMgr;
 WakeWordDetector wakeDetector;
-String wakeWordError;
+WakeWordError wakeWordError = WakeWordError::None;
+esp_err_t wakeWordMicError = ESP_OK;
 
 // State variables
 // Language-independent marker: the code detects SD playback via this station name prefix
@@ -56,7 +57,7 @@ bool alarmPlayback = false;
 // Set by audio callbacks, handled in loop() (no restart from within audio.loop())
 volatile bool pendingResume = false;
 volatile bool pendingSdNext = false;
-// Fallback, wenn WAKE_ACK_JSON auf der SD fehlt oder ungueltig ist
+// Fallback if WAKE_ACK_JSON on the SD card is missing or invalid
 const String beepTone = R"json([
   {"freq": 800, "duration": 80, "type": "sine"},
   {"freq": 1100, "duration": 100, "type": "sine"},
@@ -190,13 +191,13 @@ bool ensureWakeAckFile() {
         const DeserializationError parseError = deserializeJson(doc, json);
         json.close();
         if (!parseError && writeToneWav(filesystem, WAKE_ACK_WAV, doc.as<JsonArrayConst>(), error)) return true;
-        Serial.printf("[WAKE] %s ungueltig (%s), nutze Standardton\n", WAKE_ACK_JSON,
+        Serial.printf("[WAKE] %s invalid (%s), using default tone\n", WAKE_ACK_JSON,
                       parseError ? parseError.c_str() : error.c_str());
     }
 
     doc.clear();
     if (deserializeJson(doc, beepTone) || !writeToneWav(filesystem, WAKE_ACK_WAV, doc.as<JsonArrayConst>(), error)) {
-        Serial.printf("[WAKE] Bestaetigungston konnte nicht erzeugt werden: %s\n", error.c_str());
+        Serial.printf("[WAKE] Failed to generate confirmation tone: %s\n", error.c_str());
         return false;
     }
     return true;
@@ -218,7 +219,7 @@ void snapshotPlayback(PlaybackSnapshot &snapshot) {
 void restoreAfterSpeechCapture(bool recordingHadSpeech, bool playAck = true) {
     audio.stopSong();
     alarmPlayback = false;
-    digitalWrite(LED_PIN, LOW); // LED ausschalten, da Wake Ack abgeschlossen ist
+    digitalWrite(LED_PIN, LOW); // Turn off the LED after the wake acknowledgement finishes
     currentVolume = speechPreviousState.volume;
     audio.setVolume(currentVolume);
     if (speechPreviousState.wasPlaying) {
@@ -238,24 +239,24 @@ void restoreAfterSpeechCapture(bool recordingHadSpeech, bool playAck = true) {
         }
         isPlaying = restored;
         if (!restored) {
-            currentStation = "Gestoppt";
+            currentStation = T_IDX_STOPPED;
             currentTitle = "--";
             currentBitrate = "--";
             currentStreamUrl = "";
         }
-        Serial.printf("[WAKE] Vorherige Wiedergabe fortgesetzt: %s\n", currentStation.c_str());
+        Serial.printf("[WAKE] Previous playback restored: %s\n", currentStation.c_str());
         return;
     }
 
-    currentStation = "Gestoppt";
+    currentStation = T_IDX_STOPPED;
     currentTitle = "--";
     currentBitrate = "--";
     currentStreamUrl = "";
     isPlaying = false;
     if (playAck && sdMgr.isMounted() && ensureWakeAckFile()) {
         audio.setVolume(5);
-        currentStation = "Wake Word";
-        currentTitle = recordingHadSpeech ? "Sprachaufnahme abgeschlossen" : "Keine Sprache erkannt";
+        currentStation = T_WW_NAME;
+        currentTitle = recordingHadSpeech ? STATUS_SPEECH_COMPLETE : STATUS_NO_SPEECH;
         currentStreamUrl = WAKE_ACK_WAV;
         wakeAckTonePlaying = true;
         isPlaying = audio.connecttoFS(sdMgr.filesystem(), currentStreamUrl.c_str());
@@ -278,33 +279,34 @@ void serviceWakeWordCapture() {
     }
 
     if (wakeDetector.takeDetection() && !speechCaptureActive && !isAnnouncing) {
-        digitalWrite(LED_PIN, HIGH); // LED einschalten, um Wake Word Erkennung anzuzeigen
-        Serial.printf("[%s] [WAKE] Wake Word '%s' erkannt (%u)\n", logTimestamp().c_str(), wakeWordMgr.selected().c_str(),
-                      (unsigned)wakeDetector.detectionCount());
+        digitalWrite(LED_PIN, HIGH); // Turn on the LED to indicate wake word detection
+        Serial.printf("[%s] [WAKE] Detected wake word '%s' (%u)\n",
+              logTimestamp().c_str(), wakeWordMgr.selected().c_str(), (unsigned)wakeDetector.detectionCount());                                                       
         snapshotPlayback(speechPreviousState);
         clearSdPlayAll();
         pendingSdNext = false;
         alarmPlayback = false;
         if (speechPreviousState.wasPlaying) audio.stopSong();
         isPlaying = false;
-        currentStation = "Sprachaufnahme";
-        currentTitle = "Sprache wird aufgenommen...";
+        currentStation = STATUS_SPEECH_CAPTURE;
+        currentTitle = STATUS_RECORDING_SPEECH;
         currentBitrate = "--";
         currentStreamUrl = "";
         speechCaptureActive = true;
         wakeDetector.startRecording();
-        Serial.println("[WAKE] Aufnahme laeuft, Ende nach Stille oder max. 10 Sekunden.");
+        Serial.println("[WAKE] Recording in progress. Stops on silence or after 10 seconds.");
     }
+
 
     if (speechCaptureActive && wakeDetector.recordingComplete()) {
         const bool hasSpeech = wakeDetector.recordingHasSpeech();
         if (!hasSpeech) {
-            Serial.println("[WAKE] Keine Sprache erkannt, Aufnahme verworfen.");
+            Serial.println("[WAKE] No speech detected, recording discarded.");
         } else {
             const bool started = mqttMgr.sendWav(wakeDetector.recordingData(),
                                                  wakeDetector.recordingSampleCount(),
                                                  MicManager::SAMPLE_RATE);
-            if (!started) Serial.println("[AUDIO] Sprachaufnahme konnte nicht versendet werden.");
+            if (!started) Serial.println("[AUDIO] Failed to send speech recording.");
             if (started && mqttMgr.wavSending()) {
                 speechUploadPending = true;
                 return;
@@ -324,7 +326,7 @@ void serviceWakeWordCapture() {
         digitalWrite(LED_PIN, LOW);
         audio.setVolume(currentVolume);
         if (sdMgr.isMounted()) sdMgr.filesystem().remove(WAKE_ACK_WAV);
-        currentStation = "Gestoppt";
+        currentStation = T_IDX_STOPPED;
         currentTitle = "--";
         currentBitrate = "--";
         currentStreamUrl = "";
@@ -548,27 +550,30 @@ void handleWakeWordList() {
 
 void startWakeWord() {
     wakeDetector.end();
-    wakeWordError = "";
+    wakeWordError = WakeWordError::None;
+    wakeWordMicError = ESP_OK;
     if (wakeWordMgr.selected().isEmpty()) return;
 
     esp_err_t micErr = mic.begin(I2S_MIC_BCLK, I2S_MIC_LRC, I2S_MIC_DOUT);
     if (micErr != ESP_OK) {
-        wakeWordError = String("Mikrofon: ") + esp_err_to_name(micErr);
-        Serial.printf("[WAKE] %s\n", wakeWordError.c_str());
+        wakeWordError = WakeWordError::Microphone;
+        wakeWordMicError = micErr;
+        Serial.printf("[WAKE] %s%s\n", wakeWordErrorEnglish(wakeWordError), esp_err_to_name(micErr));
         return;
     }
     uint8_t *model = nullptr;
     WakeWordDetector::Settings settings;
     if (!wakeWordMgr.loadSelected(model, settings, wakeWordError)) {
-        Serial.printf("[WAKE] %s\n", wakeWordError.c_str());
+        Serial.printf("[WAKE] %s\n", wakeWordErrorEnglish(wakeWordError));
         return;
     }
-    if (!wakeDetector.begin(&mic, model, settings)) wakeWordError = wakeDetector.error();
+    if (!wakeDetector.begin(&mic, model, settings)) wakeWordError = wakeDetector.errorCode();
 }
 
 void handleWakeWordStatus() {
-    String error = wakeWordError;
-    if (error.isEmpty()) error = wakeDetector.error();
+    const WakeWordError code = wakeWordError == WakeWordError::None ? wakeDetector.errorCode() : wakeWordError;
+    String error = localizedWakeWordError(code);
+    if (code == WakeWordError::Microphone) error += esp_err_to_name(wakeWordMicError);
     String json = "{\"running\":" + String(wakeDetector.isRunning() ? "true" : "false") +
                   ",\"peak\":" + String(wakeDetector.takePeakProbability(), 3) +
                   ",\"detections\":" + String(wakeDetector.detectionCount()) +
@@ -578,11 +583,11 @@ void handleWakeWordStatus() {
 
 void handleWakeWordSettings() {
     if (speechCaptureActive) {
-        server.send(409, "text/plain", "Sprachaufnahme laeuft");
+        server.send(409, "text/plain", T_IDX_SPEECH_RECORDING);
         return;
     }
     if (!server.hasArg("probability_cutoff") || !server.hasArg("sliding_window_size")) {
-        server.send(400, "text/plain", "Wake-Word-Einstellungen fehlen");
+        server.send(400, "text/plain", T_IDX_WAKE_WORD_SETTINGS_MISSING);
         return;
     }
 
@@ -598,13 +603,13 @@ void handleWakeWordSettings() {
     if (cutoffEnd == cutoffArg.c_str() || *cutoffEnd != '\0' ||
         windowEnd == windowArg.c_str() || *windowEnd != '\0' || windowValue < 1 || windowValue > 32 ||
         silenceEnd == silenceArg.c_str() || *silenceEnd != '\0' || silenceValue < 0 || silenceValue > 3000 || silenceValue % 100 != 0) {
-        server.send(400, "text/plain", "Ungueltige Wake-Word-Einstellungen");
+        server.send(400, "text/plain", T_IDX_WAKE_WORD_SETTINGS_INVALID);
         return;
     }
     const int window = static_cast<int>(windowValue);
-    String error;
+    WakeWordError error = WakeWordError::None;
     if (!wakeWordMgr.saveSelectedSettings(cutoff, window, static_cast<uint16_t>(silenceValue), error)) {
-        server.send(400, "text/plain", error);
+        server.send(400, "text/plain", localizedWakeWordError(error));
         return;
     }
 
@@ -614,18 +619,18 @@ void handleWakeWordSettings() {
 
 void handleWakeWordSelect() {
     if (speechCaptureActive) {
-        server.send(409, "text/plain", "Sprachaufnahme laeuft");
+        server.send(409, "text/plain", T_IDX_SPEECH_RECORDING);
         return;
     }
     if (!wakeWordMgr.select(server.arg("name"))) {
-        server.send(404, "text/plain", "Modell nicht gefunden");
+        server.send(404, "text/plain", T_IDX_WAKE_WORD_MODEL_NOT_FOUND);
         return;
     }
     startWakeWord();
     server.send(200, "text/plain", "OK");
 }
 
-// Webserver Route: Wecker Status API
+// Web server route: alarm status API
 void handleAlarmStatus() {
     String json = alarmMgr.getStatusJson();
     json.remove(json.length() - 1);
@@ -762,7 +767,7 @@ void handleStatus() {
 void handleMicStart() {
     esp_err_t err = mic.begin(I2S_MIC_BCLK, I2S_MIC_LRC, I2S_MIC_DOUT);
     if (err != ESP_OK) {
-        server.send(500, "text/plain", "I2S-Mikrofon konnte nicht gestartet werden: " + String(esp_err_to_name(err)));
+        server.send(500, "text/plain", T_IDX_I2S_MIC_START_FAILED + String(esp_err_to_name(err)));
         return;
     }
     server.send(200, "text/plain", "OK");
@@ -1201,11 +1206,11 @@ void handleMqttConfig() {
     const String host = server.hasArg("host") ? server.arg("host") : "";
     const String sendWavUrl = server.hasArg("sendWavUrl") ? server.arg("sendWavUrl") : "";
     if (transport != "post" && host.isEmpty()) {
-        server.send(400, "text/plain", "MQTT host missing");
+        server.send(400, "text/plain", MQTT_HOST_MISSING);
         return;
     }
     if (transport == "post" && !sendWavUrl.startsWith("http://")) {
-        server.send(400, "text/plain", "HTTP WAV URL must start with http://");
+        server.send(400, "text/plain", T_SETUP_HTTP_URL_REQUIRED);
         return;
     }
     mqttMgr.saveConfig(host, server.hasArg("port") ? server.arg("port").toInt() : 1883,
@@ -1234,8 +1239,8 @@ void setup() {
 #endif
     Serial.begin(115200);
     pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, LOW); // Initialzustand der LED auf AUS setzen
-    // Warte kurz, bis der native USB-CDC Port verbunden ist
+    digitalWrite(LED_PIN, LOW); // Initialize the LED to OFF
+    // Wait briefly for the native USB-CDC port to connect
     unsigned long startMs = millis();
     while (!Serial && (millis() - startMs < 2500)) {
         delay(10);
@@ -1357,7 +1362,7 @@ void loop() {
 
     serviceWakeWordCapture();
 
-    // Timeout-Schutz für Durchsagen, falls der TTS-Stream abreißt
+    // Announcement timeout protection in case the TTS stream is interrupted
     if (isAnnouncing) {
         unsigned long now = millis();
         if (audio.isRunning()) announceLastActiveMs = now;

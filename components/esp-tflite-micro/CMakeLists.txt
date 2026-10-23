@@ -80,7 +80,7 @@ set(lib_srcs
           "${tflite_dir}/schema/schema_utils.cc")
 
 set(priv_req)
-# Ohne Component-Manager muss esp-nn (components/esp-nn) explizit angegeben werden
+# Without the Component Manager, esp-nn (components/esp-nn) must be specified explicitly
 set(pub_req esp-nn)
 
 # include component requirements which were introduced after IDF version 4.1

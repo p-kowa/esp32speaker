@@ -20,7 +20,7 @@ void MicManager::run() {
         const size_t n = bytes / sizeof(int32_t);
         double sum = 0.0;
         for (size_t i = 0; i < n; ++i) {
-            // 24 Bit MSB-ausgerichtet -> int16; Verstärkung über Shift (14 = +12 dB) anpassbar
+            // 24-bit MSB-aligned -> int16; adjust gain via the shift (14 = +12 dB)
             const int16_t s = static_cast<int16_t>(raw_[i] >> 16);
             pcmFrame_[i] = s;
             const double v = s / 32768.0;
@@ -73,7 +73,7 @@ esp_err_t MicManager::begin(int bclk, int ws, int din) {
     cfg.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX);
     cfg.sample_rate = SAMPLE_RATE;
     cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT;
-    // ICS43434 L/R-Pin auf GND -> linker Slot
+    // ICS43434 L/R pin connected to GND -> left slot
     cfg.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
     cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
     cfg.dma_buf_count = 6;

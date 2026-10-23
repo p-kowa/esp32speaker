@@ -8,7 +8,7 @@ constexpr uint32_t SAMPLE_RATE = 44100;
 constexpr uint32_t MAX_TOTAL_MS = 5000;
 constexpr size_t MAX_TONES = 64;
 constexpr float AMPLITUDE = 4500.0f;
-// Kurzes Ein-/Ausblenden verhindert Knacken an den Tongrenzen
+// Short fades prevent clicks at tone boundaries
 constexpr uint32_t FADE_SAMPLES = SAMPLE_RATE * 5 / 1000;
 constexpr size_t BUFFER_SAMPLES = 256;
 
@@ -41,7 +41,7 @@ bool parseWave(const char *type, Wave &wave) {
     return true;
 }
 
-// phase im Bereich [0, 1); Rechteck/Saegezahn leiser, da sie lauter wirken
+// phase is in [0, 1); attenuate square/sawtooth waves because they sound louder
 float waveValue(Wave wave, float phase) {
     switch (wave) {
         case Wave::Square: return (phase < 0.5f ? 1.0f : -1.0f) * 0.6f;
@@ -72,7 +72,7 @@ void makeWavHeader(uint8_t header[44], uint32_t sampleCount, uint32_t sampleRate
 
 bool writeToneWav(fs::FS &filesystem, const char *path, JsonArrayConst tones, String &error) {
     if (tones.isNull() || tones.size() == 0 || tones.size() > MAX_TONES) {
-        error = "Ton-Sequenz muss ein Array mit 1 bis " + String((unsigned)MAX_TONES) + " Eintraegen sein";
+        error = "Tone sequence must be an array with 1 to " + String((unsigned)MAX_TONES) + " entries";
         return false;
     }
 
@@ -85,12 +85,12 @@ bool writeToneWav(fs::FS &filesystem, const char *path, JsonArrayConst tones, St
         const long duration = entry["duration"] | 0L;
         Wave wave;
         if (freq < 0.0f || freq >= SAMPLE_RATE / 2.0f || duration <= 0 || !parseWave(entry["type"] | "sine", wave)) {
-            error = "Ungueltiger Ton-Eintrag " + String((unsigned)parsed.size() + 1);
+            error = "Invalid tone entry " + String((unsigned)parsed.size() + 1);
             return false;
         }
         totalMs += duration;
         if (totalMs > MAX_TOTAL_MS) {
-            error = "Ton-Sequenz laenger als " + String(MAX_TOTAL_MS) + " ms";
+            error = "Tone sequence longer than " + String(MAX_TOTAL_MS) + " ms";
             return false;
         }
         const uint32_t samples = SAMPLE_RATE * (uint32_t)duration / 1000;
@@ -100,7 +100,7 @@ bool writeToneWav(fs::FS &filesystem, const char *path, JsonArrayConst tones, St
 
     File file = filesystem.open(path, "w");
     if (!file) {
-        error = String("Datei konnte nicht erstellt werden: ") + path;
+        error = String("File could not be created: ") + path;
         return false;
     }
     uint8_t header[44];
@@ -132,7 +132,7 @@ bool writeToneWav(fs::FS &filesystem, const char *path, JsonArrayConst tones, St
     file.close();
     if (!ok) {
         filesystem.remove(path);
-        error = String("Schreiben fehlgeschlagen: ") + path;
+        error = String("Write failed: ") + path;
     }
     return ok;
 }
