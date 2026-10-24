@@ -110,6 +110,10 @@ audio, and emits `audio_eof_stream` rather than reconnecting. Chunk extensions
 are supported. Ordinary live streams retain reconnect behavior until a valid
 terminating chunk is received.
 
+The patch also fixes ring-buffer accounting when the final bytes are consumed.
+An empty buffer must not appear full and replay stale audio from the previous
+station. The decoder task rechecks playback state after acquiring its mutex.
+
 There is no full-file RAM cache, additional file-size limit, SD requirement or
 flash write. The patch is reapplied after dependency installation and is
 idempotent; unexpected source layouts fail the build explicitly.
@@ -124,6 +128,24 @@ Patch-generation regression checks can be run after installing the German
 environment's dependencies with
 `python -B -m unittest discover -s test -p test_patch_audio.py`.
 These host checks and a firmware build do not replace testing playback on the radio.
+With a native C++ compiler available (`cl` in a Visual Studio developer shell,
+`g++`, or `clang++`), the same command also compiles and runs the patched library's
+buffer, chunk-parser and EOF handling with deterministic test doubles.
+
+### WAV announcements
+
+The same build-time patch corrects the WAV `data` chunk length (it already
+excludes the header), allows short HTTP WAV files to finish header parsing,
+and drains the final PCM bytes before reporting EOF. The shared WAV header
+parser and final PCM draining are also corrected for SD playback.
+
+For ordinary PCM WAV files served with `Content-Length` (for example by Python's
+`SimpleHTTPRequestHandler`), the external Piper script no longer needs to call
+`mark_wav_streamable(OUTPUT_FILE)`. Generate and serve the original WAV unchanged.
+Existing files using `0xFFFFFFFF` size placeholders remain supported when the
+HTTP/file length is known. Supported PCM formats remain 8/16-bit, mono/stereo.
+The WAV fix is separate from the chunked-MP3 fix; on-device WAV playback still
+needs to be checked after flashing.
 
 Das Topic-Praefix wird beim Einrichten gespeichert. Ohne eigenes Praefix wird standardmaessig ein Geraetename mit Chip-ID verwendet, damit mehrere Radios im selben MQTT-Netz getrennt bleiben.
 
