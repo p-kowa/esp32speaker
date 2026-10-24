@@ -157,16 +157,50 @@ announcement duration.
 
 Use a server address reachable **from the radio**, not `localhost`.
 
-### Known short-WAV limitation
+### Audio library fixes and Home Assistant TTS
 
-With ESP32-audioI2S 3.0.12, short WAV files served over HTTP may connect and parse
-successfully without audible playback. The external Python/Piper workflow used
-with this project works around this by setting the RIFF size and `data` chunk
-size to `0xFFFFFFFF` before serving the generated WAV. Locate the actual `data`
-chunk rather than assuming a fixed 44-byte header.
+The build automatically applies [scripts/patch_audio.py](scripts/patch_audio.py)
+to the pinned ESP32-audioI2S 3.0.12 dependency. The patch is idempotent and is
+reapplied after dependency installation; unexpected source layouts fail the
+build explicitly.
 
-This is a server-side compatibility workaround, not a patch to the audio library
-or a general requirement for every WAV player. MP3 is an alternative for testing.
+Home Assistant may serve `/api/tts_proxy/*.mp3` using HTTP chunked transfer
+without a `Content-Length` header. The patch distinguishes the terminating
+zero-size chunk from separators between chunks, drains the buffered audio and
+emits `audio_eof_stream` instead of repeatedly reconnecting to the same TTS URL.
+Chunk extensions are supported. Ordinary live streams retain reconnect behavior
+until a valid terminating chunk is received.
+
+The patch also fixes ring-buffer accounting so a fully consumed buffer is
+recognized as empty rather than replaying stale audio. The decoder task rechecks
+playback state after acquiring its mutex.
+
+Home Assistant `/api/tts_proxy/` URLs received through `/api/play` or MQTT station
+URL commands are handled as announcements, restoring previous playback and radio
+volume afterward. HTTP announcement requests, including these TTS requests,
+report connection-start failures with status 502. Stopping playback cancels an
+announcement instead of resuming the interrupted station later.
+
+There is no full-file RAM cache, additional file-size limit, SD requirement or
+flash write for URL-based announcements.
+
+### WAV announcements
+
+The same library patch corrects the WAV `data` chunk length, which already
+excludes the header. It allows short HTTP WAV files to finish header parsing and
+drains the final PCM bytes before reporting EOF. The shared WAV header parser
+and final PCM draining are also corrected for SD playback.
+
+For ordinary PCM WAV files served with `Content-Length`, for example by Python's
+`SimpleHTTPRequestHandler`, generate and serve the original WAV unchanged.
+The external Piper script no longer needs to call
+`mark_wav_streamable(OUTPUT_FILE)` or replace the RIFF and `data` chunk sizes.
+Existing files using `0xFFFFFFFF` size placeholders remain supported when the
+HTTP/file length is known. Supported PCM formats remain 8/16-bit, mono/stereo.
+
+After flashing, test an unmodified WAV announcement and confirm that playback
+returns to the previous station and volume. Host regression checks do not replace
+playback testing on the device.
 The external Python service is not included in this repository.
 
 ## Wake word detection and speech upload
@@ -262,11 +296,15 @@ data:
   retain: false
 ```
 
-This firmware does **not** currently provide a native Home Assistant
-`media_player` entity, direct `tts.speak` support or an ESPHome voice-assistant
-satellite implementation. Native HA TTS would require a compatible media-player
-integration. Piper running in an LXC can separately be exposed to HA through a
-Wyoming service; that alone does not add media-player support to the radio.
+The firmware's MQTT discovery does **not** itself provide a Home Assistant
+`media_player` entity or an ESPHome voice-assistant satellite implementation.
+A compatible external Home Assistant media-player integration can provide the
+entity needed for `tts.speak` and forward the resulting audio URL to the radio.
+Home Assistant `/api/tts_proxy/` URLs are automatically treated as announcements
+when passed through `/api/play` or MQTT station URL commands.
+
+Piper running in an LXC can separately be exposed to HA through a Wyoming
+service; that alone does not add media-player support to the radio.
 
 ## Network access
 
