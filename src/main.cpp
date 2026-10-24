@@ -1481,6 +1481,8 @@ extern "C" void app_main(void)
         loop();
         delay(1);
     }
+}
+
 void audio_eof_stream(const char *info) {
     Serial.print("[EOF STREAM] ");
     Serial.println(info);
