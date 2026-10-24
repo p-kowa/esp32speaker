@@ -130,6 +130,7 @@ void startStream(const String &name, const String &url, bool persistPower = true
     currentStreamUrl = url;
     isPlaying = true;
     audio.connecttohost(currentStreamUrl.c_str());
+    audio.setVolume(currentVolume);
     if (persistPower) savePersistedRadioPower(true);
 }
 
