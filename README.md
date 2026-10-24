@@ -97,6 +97,34 @@ Die automatisch erzeugten Entities koennen direkt in Karten verwendet und dem pa
 
 ## MQTT
 
+### Home Assistant TTS audio
+
+Home Assistant may serve `/api/tts_proxy/*.mp3` using HTTP chunked transfer
+without a `Content-Length` header. ESP32-audioI2S 3.0.12 treats such a response
+as an endless radio stream and reconnects after the final audio packet.
+
+The build automatically applies [scripts/patch_audio.py](scripts/patch_audio.py)
+to the pinned ESP32-audioI2S 3.0.12 dependency. The patch distinguishes the
+terminating zero-size chunk from separators between chunks, drains the buffered
+audio, and emits `audio_eof_stream` rather than reconnecting. Chunk extensions
+are supported. Ordinary live streams retain reconnect behavior until a valid
+terminating chunk is received.
+
+There is no full-file RAM cache, additional file-size limit, SD requirement or
+flash write. The patch is reapplied after dependency installation and is
+idempotent; unexpected source layouts fail the build explicitly.
+
+HA `/api/tts_proxy/` URLs received via `/api/play` or MQTT station commands are
+handled as announcements, restoring previous playback and radio volume.
+HTTP play/announcement requests report connection-start failures with status 502.
+Stopping playback cancels an announcement instead of resuming the interrupted
+station later.
+
+Patch-generation regression checks can be run after installing the German
+environment's dependencies with
+`python -B -m unittest discover -s test -p test_patch_audio.py`.
+These host checks and a firmware build do not replace testing playback on the radio.
+
 Das Topic-Praefix wird beim Einrichten gespeichert. Ohne eigenes Praefix wird standardmaessig ein Geraetename mit Chip-ID verwendet, damit mehrere Radios im selben MQTT-Netz getrennt bleiben.
 
 Beispiele fuer Befehle:

@@ -72,7 +72,7 @@ const unsigned long ANNOUNCE_MAX_MS = 300000;
 void stopPlayback();
 bool alarmPlaybackActive() { return alarmPlayback && audio.isRunning(); }void triggerAlarmPlayback();
 void clearSdPlayAll();
-void playAnnouncement(const String &url, int volume = -1);
+bool playAnnouncement(const String &url, int volume = -1);
 void resumeAfterAnnouncement();
 
 String buildStationOptionsJson() {
@@ -122,6 +122,10 @@ void clearSdPlayAll() {
 
 void startStream(const String &name, const String &url, bool persistPower = true) {
     if (url.isEmpty()) return;
+    if (url.indexOf("/api/tts_proxy/") >= 0) {
+        playAnnouncement(url);
+        return;
+    }
     clearSdPlayAll();
     alarmPlayback = false;
     currentStation = name;
@@ -191,8 +195,8 @@ void setAnnounceVolume(int value) {
     mqttMgr.publishState(audio.isRunning(), currentStation, currentTitle, currentVolume, currentAnnounceVolume, isAnnouncing);
 }
 
-void playAnnouncement(const String &url, int volume) {
-    if (url.isEmpty()) return;
+bool playAnnouncement(const String &url, int volume) {
+    if (url.isEmpty()) return false;
 
     // If an announcement is already running, do not take a new snapshot
     if (!isAnnouncing) {
@@ -215,6 +219,7 @@ void playAnnouncement(const String &url, int volume) {
 
     int targetVol = (volume >= 0) ? constrain(volume, 0, 21) : currentAnnounceVolume;
     audio.stopSong();
+    pendingResume = false;
     clearSdPlayAll();
 
     audio.setVolume(targetVol);
@@ -228,7 +233,14 @@ void playAnnouncement(const String &url, int volume) {
                   url.c_str(), targetVol, previousState.wasPlaying, previousState.volume);
     
     mqttMgr.publishState(true, currentStation, currentTitle, targetVol, currentAnnounceVolume, true);
-    audio.connecttohost(url.c_str());
+    isPlaying = audio.connecttohost(url.c_str());
+    audio.setVolume(targetVol);
+    if (!isPlaying) {
+        Serial.println("[ANNOUNCE] Audio playback could not be started.");
+        resumeAfterAnnouncement();
+        return false;
+    }
+    return true;
 }
 
 void resumeAfterAnnouncement() {
@@ -814,6 +826,11 @@ void handleStation() {
 // Web server route: play a custom URL
 void handlePlay() {
     if (server.hasArg("url")) {
+        if (server.arg("url").indexOf("/api/tts_proxy/") >= 0) {
+            const bool started = playAnnouncement(server.arg("url"));
+            server.send(started ? 200 : 502, "text/plain", started ? "OK" : SD_PLAYBACK_FAILED);
+            return;
+        }
         clearSdPlayAll();
         alarmPlayback = false;
         currentStreamUrl = server.arg("url");
@@ -834,8 +851,8 @@ void handlePlay() {
 void handleAnnounce() {
     if (server.hasArg("url")) {
         int vol = server.hasArg("volume") ? server.arg("volume").toInt() : (server.hasArg("vol") ? server.arg("vol").toInt() : -1);
-        playAnnouncement(server.arg("url"), vol);
-        server.send(200, "text/plain", "OK");
+        const bool started = playAnnouncement(server.arg("url"), vol);
+        server.send(started ? 200 : 502, "text/plain", started ? "OK" : SD_PLAYBACK_FAILED);
         return;
     }
     server.send(400, "text/plain", NO_ANNOUNCE_URL_GIVEN);
@@ -855,7 +872,10 @@ void stopPlayback() {
     Serial.println("[RADIO] Stop");
     clearSdPlayAll();
     alarmPlayback = false;
+    isAnnouncing = false;
+    pendingResume = false;
     audio.stopSong();
+    audio.setVolume(currentVolume);
     isPlaying = false;
     savePersistedRadioPower(false);
     currentTitle = "--";
@@ -1126,4 +1146,11 @@ void audio_eof_speech(const char *info) {
     Serial.print("[EOF SPEECH] ");
     Serial.println(info);
     if (isAnnouncing) pendingResume = true;
+}
+
+void audio_eof_stream(const char *info) {
+    Serial.print("[EOF STREAM] ");
+    Serial.println(info);
+    if (isAnnouncing) pendingResume = true;
+    else isPlaying = false;
 }
