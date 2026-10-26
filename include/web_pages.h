@@ -573,7 +573,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="card">
-      <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.75rem;">MQTT / Home Assistant</h3>
+      <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.75rem;">MQTT / Home Assistant / Wyoming</h3>
       <div class="form-group">
         <label>)rawliteral" T_SETUP_WAV_TRANSPORT_LABEL R"rawliteral(</label>
         <div style="display: flex; gap: 1.5rem; margin-top: 0.3rem; margin-bottom: 0.75rem;">
@@ -583,25 +583,32 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
           <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-weight: normal;">
             <input type="radio" name="wavTransport" value="post" onclick="toggleSendMode('post')"> HTTP POST
           </label>
+          <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-weight: normal;">
+            <input type="radio" name="wavTransport" value="wyoming" onclick="toggleSendMode('wyoming')"> Wyoming
+          </label>
         </div>
       </div>
       <div class="form-group">
-        <label for="mqttHost">)rawliteral" T_SETUP_MQTT_HOST_LABEL R"rawliteral(</label>
-        <input type="text" id="mqttHost" placeholder="192.168.10.3">
+        <label for="mqttHost" id="hostLabel">MQTT Broker IP / Host</label>
+        <input type="text" id="mqttHost" placeholder="1.1.1.1">
       </div>
-      <div class="form-group">
+      <div class="form-group" id="groupMqttPort">
         <label for="mqttPort">)rawliteral" T_SETUP_PORT_LABEL R"rawliteral(</label>
         <input type="text" id="mqttPort" value="1883" inputmode="numeric">
       </div>
-      <div class="form-group">
+      <div class="form-group" id="groupWyomingPort" style="display: none;">
+        <label for="wyomingPort">Wyoming Port</label>
+        <input type="text" id="wyomingPort" value="10300" inputmode="numeric">
+      </div>
+      <div class="form-group" id="groupMqttCreds">
         <label for="mqttUser">)rawliteral" T_SETUP_MQTT_USER_LABEL R"rawliteral(</label>
         <input type="text" id="mqttUser" placeholder=")rawliteral" T_SETUP_MQTT_LEAVE_EMPTY R"rawliteral(">
       </div>
-      <div class="form-group">
+      <div class="form-group" id="groupMqttPass">
         <label for="mqttPass">)rawliteral" T_SETUP_MQTT_PASS_LABEL R"rawliteral(</label>
         <input type="password" id="mqttPass" placeholder=")rawliteral" T_SETUP_MQTT_LEAVE_EMPTY R"rawliteral(">
       </div>
-      <div class="form-group">
+      <div class="form-group" id="groupMqttBase">
         <label for="mqttBase">)rawliteral" T_SETUP_MQTT_BASE_LABEL R"rawliteral(</label>
         <input type="text" id="mqttBase" value="esp32radio">
       </div>
@@ -611,14 +618,12 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       </div>
       <div class="form-group" id="groupPostUrl" style="display: none;">
         <label for="sendWavUrl">)rawliteral" T_SETUP_WAV_HTTP_URL_LABEL R"rawliteral(</label>
-        <input type="url" id="sendWavUrl" value="" placeholder="http://192.168.1.50:1880/esp32radio/audio/upload">
+        <input type="url" id="sendWavUrl" value="" placeholder="http://1.1.1.1:1880/esp32radio/audio/upload">
         <small style="color: var(--text-muted);">)rawliteral" T_SETUP_WAV_HTTP_HINT R"rawliteral(</small>
       </div>
       <button class="btn-primary" onclick="saveMqtt()">)rawliteral" T_SETUP_MQTT_SAVE R"rawliteral(</button>
       <div id="mqttMsg" class="status-msg"></div>
       <div id="mqttStatus" class="status-msg info" style="display: block;">)rawliteral" T_SETUP_MQTT_STATUS_LOADING R"rawliteral(</div>
-    </div>
-  </div>
 
   <script>
     function showMsg(text, type) {
@@ -629,16 +634,39 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
     }
 
     function toggleSendMode(mode) {
-  const groupMqtt = document.getElementById('groupMqttWav');
-  const groupPost = document.getElementById('groupPostUrl');
-  if (mode === 'mqtt') {
-    groupMqtt.style.display = 'block';
-    groupPost.style.display = 'none';
-  } else {
-    groupMqtt.style.display = 'none';
-    groupPost.style.display = 'block';
-  }
-}
+      const groupMqttPort = document.getElementById('groupMqttPort');
+      const groupMqttWav = document.getElementById('groupMqttWav');
+      const groupPost = document.getElementById('groupPostUrl');
+      const groupWyoming = document.getElementById('groupWyomingPort');
+      const groupCreds = document.getElementById('groupMqttCreds');
+      const groupPass = document.getElementById('groupMqttPass');
+      const groupBase = document.getElementById('groupMqttBase');
+      const hostLabel = document.getElementById('hostLabel');
+
+      const isMqtt = (mode === 'mqtt');
+
+      // MQTT-spezifische Felder nur im MQTT-Modus anzeigen
+      groupMqttPort.style.display = isMqtt ? 'block' : 'none';
+      groupMqttWav.style.display = isMqtt ? 'block' : 'none';
+      groupCreds.style.display = isMqtt ? 'block' : 'none';
+      groupPass.style.display = isMqtt ? 'block' : 'none';
+      groupBase.style.display = isMqtt ? 'block' : 'none';
+
+      // Transport-spezifische Felder
+      groupPost.style.display = (mode === 'post') ? 'block' : 'none';
+      groupWyoming.style.display = (mode === 'wyoming') ? 'block' : 'none';
+
+      // Label für das Host-Feld anpassen
+      if (hostLabel) {
+        if (mode === 'wyoming') {
+          hostLabel.textContent = 'Wyoming Server IP / Host';
+        } else if (mode === 'post') {
+          hostLabel.textContent = 'HTTP Server IP / Host (optional)';
+        } else {
+          hostLabel.textContent = 'MQTT Broker IP / Host';
+        }
+      }
+    }
 
     function scanWifi() {
       const sel = document.getElementById('ssidSelect');
@@ -714,11 +742,12 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
         .then(data => {
           document.getElementById('mqttHost').value = data.host || '';
           document.getElementById('mqttPort').value = data.port || 1883;
+          document.getElementById('wyomingPort').value = data.wyomingPort || 10300;
           document.getElementById('mqttUser').value = data.user || '';
           document.getElementById('mqttBase').value = data.base || 'esp32radio';
           document.getElementById('mqttSendWav').value = data.sendWav || 'esp32radio/audio/upload';
           document.getElementById('sendWavUrl').value = data.sendWavUrl || '';
-          const transport = data.wavTransport === 'post' ? 'post' : 'mqtt';
+          const transport = ['mqtt', 'post', 'wyoming'].includes(data.wavTransport) ? data.wavTransport : 'mqtt';
           document.querySelector('input[name="wavTransport"][value="' + transport + '"]').checked = true;
           toggleSendMode(transport);
         });
@@ -760,6 +789,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       const formData = new FormData();
       formData.append('host', document.getElementById('mqttHost').value.trim());
       formData.append('port', document.getElementById('mqttPort').value || '1883');
+      formData.append('wyomingPort', document.getElementById('wyomingPort').value || '10300');
       formData.append('user', document.getElementById('mqttUser').value.trim());
       formData.append('pass', document.getElementById('mqttPass').value);
       formData.append('base', document.getElementById('mqttBase').value.trim() || 'esp32radio');
@@ -784,8 +814,6 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
         });
     }
 
-    // A scan briefly interrupts the Wi-Fi connection, so scan automatically only in hotspot mode.
-    // While connected, the subtitle shows the current network instead.
     fetch('/api/status')
       .then(res => res.json())
       .then(data => {

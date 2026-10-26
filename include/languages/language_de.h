@@ -174,7 +174,7 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: nicht gesetzt";
 #define T_SETUP_MQTT_LEAVE_EMPTY "leer lassen möglich"
 #define T_SETUP_MQTT_PASS_LABEL "Passwort (optional)"
 #define T_SETUP_MQTT_BASE_LABEL "MQTT Topic-Basis"
-#define T_SETUP_MQTT_SAVE "💾 MQTT speichern"
+#define T_SETUP_MQTT_SAVE "💾 Einstellungen speichern"
 #define T_SETUP_MQTT_STATUS_LOADING "MQTT-Status wird geladen..."
 #define T_SETUP_SEARCHING_NETWORKS "Suche Netzwerke..."
 #define T_SETUP_SCANNING "Scanne WLANs..."
@@ -307,3 +307,5 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: nicht gesetzt";
 #define T_WW_STATUS_UNREACHABLE "Erkennung: Status nicht erreichbar"
 #define T_WW_SETTINGS_SAVED "Einstellungen gespeichert und Erkennung neu gestartet."
 #define T_WW_SERVER_UNREACHABLE "Server nicht erreichbar"
+
+#define T_SETUP_WAV_WYOMING_LABEL "Wyoming Einstellungen"

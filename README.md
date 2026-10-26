@@ -234,11 +234,14 @@ as WAV using the transport selected on `/setup`:
 | --- | --- | --- |
 | MQTT | Broker and outgoing WAV topic | Binary WAV, not JSON or Base64 |
 | HTTP POST | Destination URL starting with `http://` | WAV body with `Content-Type: audio/wav` |
+| Wyoming | Server host and port (default `10300`) | Wyoming TCP events with normalized 16 kHz mono PCM; the transcript is logged and published to `<base>/state/transcript` when MQTT is connected |
 
-The receiver must accept the full WAV payload; configure MQTT message-size limits
-accordingly. The default outgoing topic is `esp32radio/audio/upload`; configure
-distinct topics for multiple radios if the receiving service needs to identify
-the source. HTTP speech upload currently supports plain HTTP, not HTTPS.
+The MQTT receiver must accept the full WAV payload; configure MQTT message-size
+limits accordingly. The default outgoing topic is `esp32radio/audio/upload`;
+configure distinct topics for multiple radios if the receiving service needs to
+identify the source. HTTP speech upload currently supports plain HTTP, not HTTPS.
+Wyoming mode connects directly to the Wyoming service and requires the server to
+be reachable from the radio on the configured TCP port.
 
 An external service must perform speech recognition and any subsequent action.
 The firmware does not perform transcription or model training.

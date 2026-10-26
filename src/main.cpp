@@ -10,6 +10,7 @@
 #include "alarm_manager.h"
 #include "station_manager.h"
 #include "mqtt_manager.h"
+#include "wyoming_client.h"
 #include "sd_manager.h"
 #include "mic_manager.h"
 #include "wake_word_manager.h"
@@ -28,6 +29,7 @@ WiFiConfigManager wifiMgr;
 AlarmManager alarmMgr;
 StationManager stationMgr;
 MqttManager mqttMgr;
+WyomingClient wyomingClient;
 SdManager sdMgr;
 MicManager mic;
 WakeWordManager wakeWordMgr;
@@ -308,9 +310,18 @@ void serviceWakeWordCapture() {
         if (!hasSpeech) {
             Serial.println("[WAKE] No speech detected, recording discarded.");
         } else {
-            const bool started = mqttMgr.sendWav(wakeDetector.recordingData(),
-                                                 wakeDetector.recordingSampleCount(),
-                                                 MicManager::SAMPLE_RATE);
+            bool started = false;
+            if (mqttMgr.wavTransportName() == "wyoming") {
+                String transcript;
+                started = wyomingClient.transcribe(mqttMgr.hostName(), wakeDetector.recordingData(),
+                                                   wakeDetector.recordingSampleCount(),
+                                                   MicManager::SAMPLE_RATE, transcript);
+                if (!transcript.isEmpty()) mqttMgr.publish("state/transcript", transcript, false);
+            } else {
+                started = mqttMgr.sendWav(wakeDetector.recordingData(),
+                                          wakeDetector.recordingSampleCount(),
+                                          MicManager::SAMPLE_RATE);
+            }
             if (!started) Serial.println("[AUDIO] Failed to send speech recording.");
             if (started && mqttMgr.wavSending()) {
                 speechUploadPending = true;
@@ -1232,12 +1243,17 @@ void handleMqttConfig() {
     const String transport = server.hasArg("wavTransport") ? server.arg("wavTransport") : "mqtt";
     const String host = server.hasArg("host") ? server.arg("host") : "";
     const String sendWavUrl = server.hasArg("sendWavUrl") ? server.arg("sendWavUrl") : "";
+    const int wyomingPort = server.hasArg("wyomingPort") ? server.arg("wyomingPort").toInt() : 10300;
     if (transport != "post" && host.isEmpty()) {
         server.send(400, "text/plain", MQTT_HOST_MISSING);
         return;
     }
     if (transport == "post" && !sendWavUrl.startsWith("http://")) {
         server.send(400, "text/plain", T_SETUP_HTTP_URL_REQUIRED);
+        return;
+    }
+    if (transport == "wyoming" && (wyomingPort < 1 || wyomingPort > 65535)) {
+        server.send(400, "text/plain", INVALID_VALUE);
         return;
     }
     mqttMgr.saveConfig(host, server.hasArg("port") ? server.arg("port").toInt() : 1883,
@@ -1247,11 +1263,17 @@ void handleMqttConfig() {
                        server.hasArg("sendWav") ? server.arg("sendWav") : "esp32radio/audio/upload",
                        transport,
                        sendWavUrl);
+    if (transport == "wyoming") wyomingClient.setPort(static_cast<uint16_t>(wyomingPort));
     server.send(200, "text/plain", "OK");
 }
 
 void handleMqttConfigGet() {
-    server.send(200, "application/json", mqttMgr.getConfigJson());
+    JsonDocument config;
+    deserializeJson(config, mqttMgr.getConfigJson());
+    config["wyomingPort"] = wyomingClient.port();
+    String json;
+    serializeJson(config, json);
+    server.send(200, "application/json", json);
 }
 
 void handleMqttStatus() {
@@ -1304,6 +1326,7 @@ void setup() {
     mqttMgr.setStationListProvider(buildStationOptionsJson);
     mqttMgr.setSdListProvider(buildSdOptionsJson);
     mqttMgr.begin(handleMqttCommand);
+    wyomingClient.begin();
 
     // Start alarm manager and NTP time sync
     alarmMgr.begin();

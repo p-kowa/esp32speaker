@@ -8,6 +8,7 @@
 #include <PubSubClient.h>
 #include <Preferences.h>
 #include "tone_wav.h"
+#include "pcm_gain.h"
 #include "log_time.h"
 #include "language.h"
 
@@ -54,11 +55,8 @@ private:
             samples = pcm;
             sampleCount = count;
             bytePosition = 0;
-            int32_t peak = 0;
-            for (size_t i = 0; i < sampleCount; ++i) {
-                peak = max(peak, abs(static_cast<int32_t>(samples[i])));
-            }
-            gain = peak > 0 ? min(8.0f, 25000.0f / peak) : 1.0f;
+            const int32_t peak = pcmPeak(samples, sampleCount);
+            gain = pcmGainForPeak(peak);
             makeWavHeader(header, sampleCount, sampleRate);
             totalBytes = sizeof(header) + sampleCount * sizeof(int16_t);
             Serial.printf("[AUDIO] WAV RAM stream: Peak level %ld, Gain %.2fx, %u bytes\n",
@@ -249,7 +247,7 @@ public:
         user = newUser;
         password = newPassword;
         base = newBase.isEmpty() ? "esp32radio" : newBase;
-        wavTransport = newWavTransport == "post" ? "post" : "mqtt";
+        wavTransport = newWavTransport == "post" || newWavTransport == "wyoming" ? newWavTransport : "mqtt";
         sendWavTopic = newSendWavTopic.isEmpty() ? "esp32radio/audio/upload" : newSendWavTopic;
         sendWavUrl = newSendWavUrl;
         prefs.begin("mqtt_config", false);
@@ -268,6 +266,8 @@ public:
     }
 
     bool configured() const { return !host.isEmpty(); }
+    const String &hostName() const { return host; }
+    const String &wavTransportName() const { return wavTransport; }
     bool connected() { return client.connected(); }
     String getStatusJson() {
         String status = !configured() ? "disabled" : (client.connected() ? "connected" : "disconnected");
@@ -291,6 +291,7 @@ public:
         if (!samples || sampleCount == 0 || sampleCount > sampleRate * 10 || wavPublishActive) return false;
         wavStream.reset(samples, sampleCount, sampleRate);
         if (wavTransport == "post") return postWav();
+        if (wavTransport == "wyoming") return false;
         if (!client.connected() || sendWavTopic.isEmpty()) return false;
         if (sendWavTopic.indexOf('+') >= 0 || sendWavTopic.indexOf('#') >= 0) return false;
 
