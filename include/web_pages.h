@@ -802,8 +802,12 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
         .then(() => {
           const msg = document.getElementById('mqttMsg');
           msg.className = 'status-msg success';
-          msg.innerText = ')rawliteral" T_SETUP_MQTT_SAVED R"rawliteral(';
-          msg.style.display = 'block';
+          if (transport === 'mqtt') {
+            msg.innerText = ')rawliteral" T_SETUP_MQTT_SAVED R"rawliteral(';
+            msg.style.display = 'block';
+          } else {
+            msg.style.display = 'none';
+          }
           loadMqttStatus();
         })
         .catch(error => {
