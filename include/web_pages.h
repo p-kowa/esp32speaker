@@ -589,16 +589,12 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
         </div>
       </div>
       <div class="form-group">
-        <label for="mqttHost" id="hostLabel">MQTT Broker IP / Host</label>
+        <label for="mqttHost">MQTT Broker IP / Host</label>
         <input type="text" id="mqttHost" placeholder="1.1.1.1">
       </div>
       <div class="form-group" id="groupMqttPort">
         <label for="mqttPort">)rawliteral" T_SETUP_PORT_LABEL R"rawliteral(</label>
         <input type="text" id="mqttPort" value="1883" inputmode="numeric">
-      </div>
-      <div class="form-group" id="groupWyomingPort" style="display: none;">
-        <label for="wyomingPort">Wyoming Port</label>
-        <input type="text" id="wyomingPort" value="10300" inputmode="numeric">
       </div>
       <div class="form-group" id="groupMqttCreds">
         <label for="mqttUser">)rawliteral" T_SETUP_MQTT_USER_LABEL R"rawliteral(</label>
@@ -621,6 +617,16 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
         <input type="url" id="sendWavUrl" value="" placeholder="http://1.1.1.1:1880/esp32radio/audio/upload">
         <small style="color: var(--text-muted);">)rawliteral" T_SETUP_WAV_HTTP_HINT R"rawliteral(</small>
       </div>
+      <div id="groupWyoming" style="display: none;">
+        <div class="form-group">
+          <label for="wyomingHost">Wyoming Server IP / Host</label>
+          <input type="text" id="wyomingHost" placeholder="1.1.1.1">
+        </div>
+        <div class="form-group">
+          <label for="wyomingPort">Wyoming Port</label>
+          <input type="text" id="wyomingPort" value="10300" inputmode="numeric">
+        </div>
+      </div>
       <button class="btn-primary" onclick="saveMqtt()">)rawliteral" T_SETUP_MQTT_SAVE R"rawliteral(</button>
       <div id="mqttMsg" class="status-msg"></div>
       <div id="mqttStatus" class="status-msg info" style="display: block;">)rawliteral" T_SETUP_MQTT_STATUS_LOADING R"rawliteral(</div>
@@ -634,38 +640,9 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
     }
 
     function toggleSendMode(mode) {
-      const groupMqttPort = document.getElementById('groupMqttPort');
-      const groupMqttWav = document.getElementById('groupMqttWav');
-      const groupPost = document.getElementById('groupPostUrl');
-      const groupWyoming = document.getElementById('groupWyomingPort');
-      const groupCreds = document.getElementById('groupMqttCreds');
-      const groupPass = document.getElementById('groupMqttPass');
-      const groupBase = document.getElementById('groupMqttBase');
-      const hostLabel = document.getElementById('hostLabel');
-
-      const isMqtt = (mode === 'mqtt');
-
-      // MQTT-spezifische Felder nur im MQTT-Modus anzeigen
-      groupMqttPort.style.display = isMqtt ? 'block' : 'none';
-      groupMqttWav.style.display = isMqtt ? 'block' : 'none';
-      groupCreds.style.display = isMqtt ? 'block' : 'none';
-      groupPass.style.display = isMqtt ? 'block' : 'none';
-      groupBase.style.display = isMqtt ? 'block' : 'none';
-
-      // Transport-spezifische Felder
-      groupPost.style.display = (mode === 'post') ? 'block' : 'none';
-      groupWyoming.style.display = (mode === 'wyoming') ? 'block' : 'none';
-
-      // Label für das Host-Feld anpassen
-      if (hostLabel) {
-        if (mode === 'wyoming') {
-          hostLabel.textContent = 'Wyoming Server IP / Host';
-        } else if (mode === 'post') {
-          hostLabel.textContent = 'HTTP Server IP / Host (optional)';
-        } else {
-          hostLabel.textContent = 'MQTT Broker IP / Host';
-        }
-      }
+      document.getElementById('groupMqttWav').style.display = (mode === 'mqtt') ? 'block' : 'none';
+      document.getElementById('groupPostUrl').style.display = (mode === 'post') ? 'block' : 'none';
+      document.getElementById('groupWyoming').style.display = (mode === 'wyoming') ? 'block' : 'none';
     }
 
     function scanWifi() {
@@ -742,6 +719,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
         .then(data => {
           document.getElementById('mqttHost').value = data.host || '';
           document.getElementById('mqttPort').value = data.port || 1883;
+          document.getElementById('wyomingHost').value = data.wyomingHost || '';
           document.getElementById('wyomingPort').value = data.wyomingPort || 10300;
           document.getElementById('mqttUser').value = data.user || '';
           document.getElementById('mqttBase').value = data.base || 'esp32radio';
@@ -789,6 +767,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       const formData = new FormData();
       formData.append('host', document.getElementById('mqttHost').value.trim());
       formData.append('port', document.getElementById('mqttPort').value || '1883');
+      formData.append('wyomingHost', document.getElementById('wyomingHost').value.trim());
       formData.append('wyomingPort', document.getElementById('wyomingPort').value || '10300');
       formData.append('user', document.getElementById('mqttUser').value.trim());
       formData.append('pass', document.getElementById('mqttPass').value);

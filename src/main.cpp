@@ -313,7 +313,7 @@ void serviceWakeWordCapture() {
             bool started = false;
             if (mqttMgr.wavTransportName() == "wyoming") {
                 String transcript;
-                started = wyomingClient.transcribe(mqttMgr.hostName(), wakeDetector.recordingData(),
+                started = wyomingClient.transcribe(wakeDetector.recordingData(),
                                                    wakeDetector.recordingSampleCount(),
                                                    MicManager::SAMPLE_RATE, transcript);
                 if (!transcript.isEmpty()) mqttMgr.publish("state/transcript", transcript, false);
@@ -1244,12 +1244,17 @@ void handleMqttConfig() {
     const String host = server.hasArg("host") ? server.arg("host") : "";
     const String sendWavUrl = server.hasArg("sendWavUrl") ? server.arg("sendWavUrl") : "";
     const int wyomingPort = server.hasArg("wyomingPort") ? server.arg("wyomingPort").toInt() : 10300;
-    if (transport != "post" && host.isEmpty()) {
+    const String wyomingHost = server.hasArg("wyomingHost") ? server.arg("wyomingHost") : "";
+    if (transport == "mqtt" && host.isEmpty()) {
         server.send(400, "text/plain", MQTT_HOST_MISSING);
         return;
     }
     if (transport == "post" && !sendWavUrl.startsWith("http://")) {
         server.send(400, "text/plain", T_SETUP_HTTP_URL_REQUIRED);
+        return;
+    }
+    if (transport == "wyoming" && wyomingHost.isEmpty()) {
+        server.send(400, "text/plain", T_SETUP_WYOMING_HOST_REQUIRED);
         return;
     }
     if (transport == "wyoming" && (wyomingPort < 1 || wyomingPort > 65535)) {
@@ -1263,13 +1268,14 @@ void handleMqttConfig() {
                        server.hasArg("sendWav") ? server.arg("sendWav") : "esp32radio/audio/upload",
                        transport,
                        sendWavUrl);
-    if (transport == "wyoming") wyomingClient.setPort(static_cast<uint16_t>(wyomingPort));
+    if (transport == "wyoming") wyomingClient.setServer(wyomingHost, static_cast<uint16_t>(wyomingPort));
     server.send(200, "text/plain", "OK");
 }
 
 void handleMqttConfigGet() {
     JsonDocument config;
     deserializeJson(config, mqttMgr.getConfigJson());
+    config["wyomingHost"] = wyomingClient.host();
     config["wyomingPort"] = wyomingClient.port();
     String json;
     serializeJson(config, json);

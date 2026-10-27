@@ -13,27 +13,30 @@ public:
 
     void begin() {
         prefs.begin("wyoming", true);
+        host_ = prefs.getString("host", "");
         port_ = prefs.getUShort("port", DEFAULT_PORT);
         prefs.end();
     }
 
+    const String &host() const { return host_; }
     uint16_t port() const { return port_; }
 
-    void setPort(uint16_t newPort) {
+    void setServer(const String &newHost, uint16_t newPort) {
+        host_ = newHost;
         port_ = newPort ? newPort : static_cast<uint16_t>(DEFAULT_PORT);
         prefs.begin("wyoming", false);
+        prefs.putString("host", host_);
         prefs.putUShort("port", port_);
         prefs.end();
     }
 
-    bool transcribe(const String &host, const int16_t *samples, size_t sampleCount,
-                    uint32_t sampleRate, String &transcript) {
+    bool transcribe(const int16_t *samples, size_t sampleCount, uint32_t sampleRate, String &transcript) {
         transcript = "";
-        if (host.isEmpty() || !samples || sampleCount == 0) return false;
+        if (host_.isEmpty() || !samples || sampleCount == 0) return false;
 
         WiFiClient connection;
-        if (!connection.connect(host.c_str(), port_, 5000)) {
-            Serial.printf("[Wyoming] Connection to %s:%u failed\n", host.c_str(), port_);
+        if (!connection.connect(host_.c_str(), port_, 5000)) {
+            Serial.printf("[Wyoming] Connection to %s:%u failed\n", host_.c_str(), port_);
             return false;
         }
         // connect() resets the timeout, so it must be set afterwards (in seconds)
@@ -60,8 +63,7 @@ public:
 
         const int32_t peak = pcmPeak(samples, sampleCount);
         const float gain = pcmGainForPeak(peak);
-        Serial.printf("[Wyoming] Sending %u samples, peak %ld, gain %.2fx\n",
-                      (unsigned)sampleCount, (long)peak, gain);
+        Serial.printf("[%s] [Wyoming] Sending %u samples, peak %ld, gain %.2fx\n", logTimestamp().c_str(), (unsigned)sampleCount, (long)peak, gain);
 
         int16_t chunk[CHUNK_SAMPLES];
         for (size_t offset = 0; offset < sampleCount; offset += CHUNK_SAMPLES) {
@@ -104,7 +106,7 @@ public:
             Serial.println("[Wyoming] No transcript received.");
             return false;
         }
-        Serial.printf("[Wyoming] Transcript: %s\n", transcript.c_str());
+        Serial.printf("[%s] [Wyoming] Transcript: %s\n", logTimestamp().c_str(), transcript.c_str());
         return true;
     }
 
@@ -113,6 +115,7 @@ private:
     static constexpr uint32_t RESPONSE_TIMEOUT_S = 60;
 
     Preferences prefs;
+    String host_;
     uint16_t port_ = DEFAULT_PORT;
 
     static bool sendBytes(WiFiClient &connection, const uint8_t *data, size_t length) {

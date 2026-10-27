@@ -204,6 +204,7 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: not set";
 #define T_SETUP_WAV_HTTP_URL_LABEL "HTTP URL for WAV messages"
 #define T_SETUP_WAV_HTTP_HINT "Only http:// is supported. Use the IP address of the Whisper server, not localhost."
 #define T_SETUP_HTTP_URL_REQUIRED "Please enter an HTTP URL starting with http://."
+#define T_SETUP_WYOMING_HOST_REQUIRED "Please enter a Wyoming server."
 #define T_SETUP_SAVE_FAILED_PREFIX "Saving failed: "
 
 #define T_IDX_OPTIONS "Options"

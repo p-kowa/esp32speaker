@@ -266,7 +266,6 @@ public:
     }
 
     bool configured() const { return !host.isEmpty(); }
-    const String &hostName() const { return host; }
     const String &wavTransportName() const { return wavTransport; }
     bool connected() { return client.connected(); }
     String getStatusJson() {
