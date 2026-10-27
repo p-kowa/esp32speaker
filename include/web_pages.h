@@ -103,7 +103,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           <a href="/sdcard" class="btn-settings">💾 MicroSD</a>
         </div>
       </div>
-      <div class="subtitle">Audio Streamer</div>
+      <div class="subtitle">)rawliteral" T_IDX_SUBTITLE R"rawliteral(</div>
       
       <div class="now-playing">
         <div id="statusBadge" class="status-badge">
@@ -578,7 +578,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
         <input type="text" id="mqttHost" placeholder="192.168.10.3">
       </div>
       <div class="form-group">
-        <label for="mqttPort">Port</label>
+        <label for="mqttPort">)rawliteral" T_SETUP_PORT_LABEL R"rawliteral(</label>
         <input type="text" id="mqttPort" value="1883" inputmode="numeric">
       </div>
       <div class="form-group">
@@ -717,13 +717,19 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       formData.append('base', document.getElementById('mqttBase').value.trim() || 'esp32radio');
 
       fetch('/api/mqtt/config', { method: 'POST', body: formData })
-        .then(res => res.text())
+        .then(res => res.ok ? res.text() : res.text().then(text => Promise.reject(text)))
         .then(() => {
           const msg = document.getElementById('mqttMsg');
           msg.className = 'status-msg success';
           msg.innerText = ')rawliteral" T_SETUP_MQTT_SAVED R"rawliteral(';
           msg.style.display = 'block';
           loadMqttStatus();
+        })
+        .catch(error => {
+          const msg = document.getElementById('mqttMsg');
+          msg.className = 'status-msg error';
+          msg.innerText = ')rawliteral" T_SETUP_SAVE_FAILED_PREFIX R"rawliteral(' + error;
+          msg.style.display = 'block';
         });
     }
 
@@ -964,7 +970,7 @@ const char ALARM_HTML[] PROGMEM = R"rawliteral(
       const stopping = alarmPlaying;
       fetch('/api/alarm/test', { method: 'POST' })
         .then(res => {
-          if (!res.ok) throw new Error('Keine Senderliste');
+          if (!res.ok) throw new Error(')rawliteral" T_ALARM_STATION_LIST_UNAVAILABLE R"rawliteral(');
           showMsg(stopping ? ')rawliteral" T_ALARM_STOPPED_MSG R"rawliteral(' : ')rawliteral" T_ALARM_TRIGGERED_MSG R"rawliteral(', 'success');
           return loadAlarmStatus();
         })

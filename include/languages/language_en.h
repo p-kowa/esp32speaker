@@ -89,6 +89,7 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: not set";
 #define T_ALARM_STOP_TEST_BUTTON "⏹ Stop alarm test"
 #define T_ALARM_STOPPED_MSG "⏹ Alarm test stopped."
 #define T_ALARM_NEED_STATIONS "Please upload an M3U station list first."
+#define T_ALARM_STATION_LIST_UNAVAILABLE "Station list unavailable"
 
 #define T_SD_PAGE_TITLE "MicroSD - ESP32 Radio"
 #define T_SD_HEADING "MicroSD files"
@@ -167,8 +168,11 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: not set";
 #define T_SETUP_MQTT_UNKNOWN "MQTT status unknown"
 #define T_SETUP_MQTT_UNREACHABLE "MQTT status not reachable"
 #define T_SETUP_MQTT_SAVED "MQTT saved. Connecting."
+#define T_SETUP_SAVE_FAILED_PREFIX "Saving failed: "
+#define T_SETUP_PORT_LABEL "Port"
 
 #define T_IDX_OPTIONS "Options"
+#define T_IDX_SUBTITLE "Audio Streamer"
 #define T_IDX_NAV_ALARM "⏰ Alarm"
 #define T_IDX_NAV_WIFI "⚙️ Wi-Fi"
 #define T_IDX_STOPPED "Stopped"
