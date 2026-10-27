@@ -36,6 +36,7 @@ WakeWordManager wakeWordMgr;
 WakeWordDetector wakeDetector;
 WakeWordError wakeWordError = WakeWordError::None;
 esp_err_t wakeWordMicError = ESP_OK;
+String lastWyomingTranscript;
 
 // State variables
 // Language-independent marker: the code detects SD playback via this station name prefix
@@ -316,7 +317,10 @@ void serviceWakeWordCapture() {
                 started = wyomingClient.transcribe(wakeDetector.recordingData(),
                                                    wakeDetector.recordingSampleCount(),
                                                    MicManager::SAMPLE_RATE, transcript);
-                if (!transcript.isEmpty()) mqttMgr.publish("state/transcript", transcript, false);
+                if (!transcript.isEmpty()) {
+                    lastWyomingTranscript = transcript;
+                    mqttMgr.publish("state/transcript", transcript, false);
+                }
             } else {
                 started = mqttMgr.sendWav(wakeDetector.recordingData(),
                                           wakeDetector.recordingSampleCount(),
@@ -604,10 +608,13 @@ void handleWakeWordStatus() {
     const WakeWordError code = wakeWordError == WakeWordError::None ? wakeDetector.errorCode() : wakeWordError;
     String error = localizedWakeWordError(code);
     if (code == WakeWordError::Microphone) error += esp_err_to_name(wakeWordMicError);
+    const bool wyoming = mqttMgr.wavTransportName() == "wyoming";
     String json = "{\"running\":" + String(wakeDetector.isRunning() ? "true" : "false") +
                   ",\"peak\":" + String(wakeDetector.takePeakProbability(), 3) +
                   ",\"detections\":" + String(wakeDetector.detectionCount()) +
-                  ",\"error\":\"" + StationManager::jsonEscape(error) + "\"}";
+                  ",\"error\":\"" + StationManager::jsonEscape(error) + "\"" +
+                  ",\"wyoming\":" + String(wyoming ? "true" : "false") +
+                  ",\"transcript\":\"" + StationManager::jsonEscape(wyoming ? lastWyomingTranscript : String()) + "\"}";
     server.send(200, "application/json", json);
 }
 

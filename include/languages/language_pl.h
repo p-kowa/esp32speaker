@@ -278,6 +278,8 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: nie ustawiono";
 #define T_WW_PROBABILITY_LABEL "Prawdopodobieństwo: "
 #define T_WW_DISABLE "Wyłącz słowo wybudzające"
 #define T_WW_LOADING_MODELS "Ładowanie modeli ..."
+#define T_WW_TRANSCRIPT_HEADING "Ostatnia transkrypcja"
+#define T_WW_TRANSCRIPT_EMPTY "Brak transkrypcji."
 #define T_WW_DETECTION_HEADING "Wykrywanie słowa wybudzającego"
 #define T_WW_THRESHOLD "Próg"
 #define T_WW_THRESHOLD_HINT "Im wyższa wartość, tym większa musi być pewność wykrycia słowa wybudzającego."

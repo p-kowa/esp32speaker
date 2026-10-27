@@ -1289,6 +1289,10 @@ const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
         <button class="secondary" onclick="load()">)rawliteral" T_SD_REFRESH R"rawliteral(</button>
       </div>
     </section>
+    <section id="transcriptCard" hidden>
+      <h2>)rawliteral" T_WW_TRANSCRIPT_HEADING R"rawliteral(</h2>
+      <p class="empty" id="transcriptText">)rawliteral" T_WW_TRANSCRIPT_EMPTY R"rawliteral(</p>
+    </section>
     <section>
       <div id="modelList"><div class="empty">)rawliteral" T_WW_LOADING_MODELS R"rawliteral(</div></div>
     </section>
@@ -1441,6 +1445,11 @@ const char WAKEWORD_HTML[] PROGMEM = R"rawliteral(
     async function pollStatus() {
       try {
         const s = await fetch('/api/wakeword/status').then(response => response.json());
+        const transcriptCard = document.getElementById('transcriptCard');
+        transcriptCard.hidden = !s.wyoming;
+        if (s.wyoming) {
+          document.getElementById('transcriptText').textContent = s.transcript || ')rawliteral" T_WW_TRANSCRIPT_EMPTY R"rawliteral(';
+        }
         const detector = document.getElementById('detector');
         detector.textContent = ')rawliteral" T_WW_DETECTION_LABEL R"rawliteral(' + (s.running ? ')rawliteral" T_WW_RUNNING R"rawliteral(' : ')rawliteral" T_WW_OFF R"rawliteral(') + (s.error ? ' – ' + s.error : '') + ' · )rawliteral" T_WW_DETECTED_LABEL R"rawliteral(' + s.detections;
         const fill = document.getElementById('probFill');

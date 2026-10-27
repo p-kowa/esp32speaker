@@ -278,6 +278,8 @@ constexpr const char* ALARM_LABEL_RADIO_NOT_SET = "Radio: nicht gesetzt";
 #define T_WW_PROBABILITY_LABEL "Wahrscheinlichkeit: "
 #define T_WW_DISABLE "Wake Word deaktivieren"
 #define T_WW_LOADING_MODELS "Modelle werden geladen ..."
+#define T_WW_TRANSCRIPT_HEADING "Letzte Transkription"
+#define T_WW_TRANSCRIPT_EMPTY "Noch keine Transkription vorhanden."
 #define T_WW_DETECTION_HEADING "Wake-Word-Erkennung"
 #define T_WW_THRESHOLD "Schwellwert"
 #define T_WW_THRESHOLD_HINT "Je höher, desto sicherer muss das Wake Word erkannt werden."
