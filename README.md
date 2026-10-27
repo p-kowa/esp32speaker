@@ -16,7 +16,8 @@ after wake word detection to an external service.
   playback.
 - MQTT control, availability reporting and Home Assistant discovery.
 - Local microWakeWord inference using an ICS43434 I2S microphone.
-- Post-detection speech capture and WAV upload over MQTT or HTTP POST.
+- Post-detection speech capture with WAV upload over MQTT or HTTP POST, or
+  transcription through a Wyoming server.
 - German, English and Polish firmware variants.
 - Persistent Wi-Fi, MQTT, alarm and wake word settings.
 
@@ -102,7 +103,7 @@ consistent with the TFLite Micro component build because it affects tensor layou
 | `/setup` | Wi-Fi, MQTT and outgoing speech-upload settings |
 | `/alarm` | Alarm time, enable switch, volume and playback test |
 | `/sdcard` | Audio file management and playback |
-| `/wakeword` | Model selection, detection status and model settings |
+| `/wakeword` | Model selection, detection status and model settings; shows the latest transcript when Wyoming is active |
 
 UI and API messages follow the firmware language. Diagnostic log messages are
 English. Native file-picker labels and the system file dialog follow the browser
@@ -234,7 +235,7 @@ as WAV using the transport selected on `/setup`:
 | --- | --- | --- |
 | MQTT | Broker and outgoing WAV topic | Binary WAV, not JSON or Base64 |
 | HTTP POST | Destination URL starting with `http://` | WAV body with `Content-Type: audio/wav` |
-| Wyoming | Server host and port (default `10300`) | Wyoming TCP events with normalized 16 kHz mono PCM; the transcript is logged and published to `<base>/state/transcript` when MQTT is connected |
+| Wyoming | Server host and port (default `10300`) | Wyoming TCP events with normalized 16 kHz mono PCM; the transcript is logged, shown on `/wakeword` and published to `<base>/state/transcript` when MQTT is connected |
 
 The MQTT receiver must accept the full WAV payload; configure MQTT message-size
 limits accordingly. The default outgoing topic is `esp32radio/audio/upload`;
