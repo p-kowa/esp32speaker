@@ -630,6 +630,8 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       <button class="btn-primary" onclick="saveMqtt()">)rawliteral" T_SETUP_MQTT_SAVE R"rawliteral(</button>
       <div id="mqttMsg" class="status-msg"></div>
       <div id="mqttStatus" class="status-msg info" style="display: block;">)rawliteral" T_SETUP_MQTT_STATUS_LOADING R"rawliteral(</div>
+    </div>
+  </div>
 
   <script>
     function showMsg(text, type) {
@@ -797,6 +799,8 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
         });
     }
 
+    // A scan briefly interrupts the Wi-Fi connection, so scan automatically only in hotspot mode.
+    // While connected, the subtitle shows the current network instead.
     fetch('/api/status')
       .then(res => res.json())
       .then(data => {
