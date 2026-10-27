@@ -9,7 +9,7 @@ inline int32_t pcmPeak(const int16_t *samples, size_t count) {
     return peak;
 }
 
-// Peak normalization to 25000/32767 with at most 8x gain
+// Peak normalization to 25000/32767 with at most 20x gain
 inline float pcmGainForPeak(int32_t peak) {
-    return peak > 0 ? min(8.0f, 25000.0f / peak) : 1.0f;
+    return peak > 0 ? min(20.0f, 25000.0f / peak) : 1.0f;
 }
